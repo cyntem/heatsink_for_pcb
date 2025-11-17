@@ -22,9 +22,25 @@ def _has_freecad_gui() -> bool:
     return spec is not None
 
 
+def _module_dir() -> Path:
+    """Return the directory containing this module.
+
+    Some FreeCAD initialization contexts remove ``__file__``. Fall back to
+    ``__spec__.origin`` when that happens to keep icon resolution robust.
+    """
+
+    try:
+        return Path(__file__).parent
+    except NameError:
+        spec = globals().get("__spec__")
+        if spec and spec.origin:
+            return Path(spec.origin).parent
+        return Path.cwd()
+
+
 FREECAD_AVAILABLE = _has_freecad_gui()
 
-ICON_PATH = str(Path(__file__).parent / "icons" / "heatsink.svg")
+ICON_PATH = str(_module_dir() / "icons" / "heatsink.svg")
 
 if FREECAD_AVAILABLE:
     import FreeCADGui  # type: ignore
