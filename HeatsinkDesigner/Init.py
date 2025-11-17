@@ -1,33 +1,54 @@
-"""FreeCAD entry point stub for HeatsinkDesigner workbench."""
+"""FreeCAD console entry point for HeatsinkDesigner workbench."""
 from __future__ import annotations
-
-import importlib
 
 
 def _load_dependency_status():
-    """Import ``dependency_status`` whether or not the module is a package.
+    """Вернуть функцию dependency_status из thermal_model.
 
-    When FreeCAD executes this file directly (for example during manual
-    installation), ``__package__`` may be unset, making relative imports
-    fail with ``attempted relative import with no known parent package``.
-    Falling back to an absolute import keeps the module working in both
-    contexts.
+    Работает и когда HeatsinkDesigner установлен как пакет (относительный импорт),
+    и когда FreeCAD просто исполняет Init.py как обычный скрипт (absolute import).
     """
 
+    # 1) Нормальный случай: пакет установлен, работает относительный импорт
     try:
         from .thermal_model import dependency_status as loader
         return loader
-    except ImportError:
-        # ``thermal_model`` sits next to this file, so absolute import works
-        # even when Python does not treat it as a package yet.
-        return importlib.import_module("thermal_model").dependency_status
+    except Exception:
+        # 2) FreeCAD запускает модуль без пакета: пробуем абсолютный импорт
+        try:
+            from importlib import import_module
+        except Exception:
+            # Даже importlib недоступен – возвращаем заглушку
+            def _fallback_dependency_status():
+                class _DummyStatus:
+                    def warning_messages(self):
+                        return ["importlib not available; thermal_model not loaded"]
+
+                return _DummyStatus()
+
+            return _fallback_dependency_status
+
+        try:
+            module = import_module("thermal_model")
+            return module.dependency_status
+        except Exception:
+            # thermal_model не найден – возвращаем заглушку
+            def _fallback_dependency_status():
+                class _DummyStatus:
+                    def warning_messages(self):
+                        return ["thermal_model module not found"]
+
+                return _DummyStatus()
+
+            return _fallback_dependency_status
 
 
+# Привязываем функцию dependency_status один раз при загрузке модуля
 dependency_status = _load_dependency_status()
 
 
 def Initialize() -> str:
-    """Return a short message; FreeCAD calls this when loading the module."""
+    """Краткое сообщение; FreeCAD вызывает это при загрузке модуля (консоль)."""
 
     status = dependency_status()
     warnings = status.warning_messages()
@@ -37,4 +58,5 @@ def Initialize() -> str:
 
 
 def FreeCADInit() -> None:  # pragma: no cover - entry point for FreeCAD
+    """Точка входа для FreeCAD (общая инициализация)."""
     Initialize()
