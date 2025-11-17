@@ -1,9 +1,9 @@
 """Workbench registration placeholder for FreeCAD."""
 from __future__ import annotations
 
+import os
 import sys
 from importlib import util as importlib_util
-from pathlib import Path
 
 def _has_freecad_gui() -> bool:
     """Safely detect FreeCAD GUI availability.
@@ -22,25 +22,45 @@ def _has_freecad_gui() -> bool:
     return spec is not None
 
 
-def _module_dir() -> Path:
+def _module_dir() -> str:
     """Return the directory containing this module.
 
     Some FreeCAD initialization contexts remove ``__file__``. Fall back to
     ``__spec__.origin`` when that happens to keep icon resolution robust.
+
+    We avoid depending on a global ``Path`` symbol because certain FreeCAD
+    startup configurations clear module globals, which previously resulted in
+    a ``NameError`` during initialization. The lightweight ``os.path`` helpers
+    remain available even in those constrained environments.
     """
 
     try:
-        return Path(__file__).parent
-    except NameError:
-        spec = globals().get("__spec__")
-        if spec and spec.origin:
-            return Path(spec.origin).parent
-        return Path.cwd()
+        from pathlib import Path
+    except Exception:
+        Path = None  # type: ignore
+
+    if Path is not None:
+        try:
+            return str(Path(__file__).parent)
+        except NameError:
+            spec = globals().get("__spec__")
+            if spec and spec.origin:
+                return str(Path(spec.origin).parent)
+            return str(Path.cwd())
+
+    if "__file__" in globals():
+        return os.path.dirname(os.path.abspath(__file__))
+
+    spec = globals().get("__spec__")
+    if spec and getattr(spec, "origin", None):
+        return os.path.dirname(os.path.abspath(spec.origin))
+
+    return os.getcwd()
 
 
 FREECAD_AVAILABLE = _has_freecad_gui()
 
-ICON_PATH = str(_module_dir() / "icons" / "heatsink.svg")
+ICON_PATH = os.path.join(_module_dir(), "icons", "heatsink.svg")
 
 if FREECAD_AVAILABLE:
     import FreeCADGui  # type: ignore
