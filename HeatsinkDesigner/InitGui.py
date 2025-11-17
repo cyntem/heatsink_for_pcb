@@ -23,8 +23,8 @@ def _has_freecad_gui() -> bool:
     return spec is not None
 
 
-def _module_dir() -> str:
-    """Return the directory containing this module.
+def _module_dir():
+    """Return the directory containing this module as a ``Path``.
 
     Some FreeCAD initialization contexts remove ``__file__``. Fall back to
     ``__spec__.origin`` when that happens to keep icon resolution robust.
@@ -37,32 +37,39 @@ def _module_dir() -> str:
 
     try:
         from pathlib import Path
-    except Exception:
+    except Exception:  # pragma: no cover - extremely defensive
         Path = None  # type: ignore
 
     if Path is not None:
         try:
-            return str(Path(__file__).parent)
+            return Path(__file__).parent
         except NameError:
             spec = globals().get("__spec__")
             if spec and spec.origin:
-                return str(Path(spec.origin).parent)
-            return str(Path.cwd())
+                return Path(spec.origin).parent
+            return Path.cwd()
 
+    # ``pathlib`` is unavailable; fall back to ``os.path`` strings and convert
+    # through ``Path`` once the module becomes importable again.
+    fallback = None
     if "__file__" in globals():
-        return os.path.dirname(os.path.abspath(__file__))
+        fallback = os.path.dirname(os.path.abspath(__file__))
+    else:
+        spec = globals().get("__spec__")
+        if spec and getattr(spec, "origin", None):
+            fallback = os.path.dirname(os.path.abspath(spec.origin))
+    if fallback is None:
+        fallback = os.getcwd()
 
-    spec = globals().get("__spec__")
-    if spec and getattr(spec, "origin", None):
-        return os.path.dirname(os.path.abspath(spec.origin))
-
-    return os.getcwd()
+    if Path is None:  # pragma: no cover - see note above
+        return fallback
+    return Path(fallback)
 
 
 def _icon_path() -> str:
     """Return the absolute path to the workbench icon."""
 
-    return os.path.join(_module_dir(), "icons", "heatsink.svg")
+    return os.path.join(str(_module_dir()), "icons", "heatsink.svg")
 
 
 FREECAD_AVAILABLE = _has_freecad_gui()
