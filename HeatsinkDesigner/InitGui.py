@@ -5,6 +5,7 @@ import os
 import sys
 from importlib import util as importlib_util
 
+
 def _has_freecad_gui() -> bool:
     """Safely detect FreeCAD GUI availability.
 
@@ -58,9 +59,13 @@ def _module_dir() -> str:
     return os.getcwd()
 
 
-FREECAD_AVAILABLE = _has_freecad_gui()
+def _icon_path() -> str:
+    """Return the absolute path to the workbench icon."""
 
-ICON_PATH = os.path.join(_module_dir(), "icons", "heatsink.svg")
+    return os.path.join(_module_dir(), "icons", "heatsink.svg")
+
+
+FREECAD_AVAILABLE = _has_freecad_gui()
 
 if FREECAD_AVAILABLE:
     import FreeCADGui  # type: ignore
@@ -68,7 +73,10 @@ if FREECAD_AVAILABLE:
     class HeatsinkDesignerWorkbench(FreeCADGui.Workbench):  # pragma: no cover
         MenuText = "HeatsinkDesigner"
         ToolTip = "Generate CNC-friendly heatsinks"
-        Icon = ICON_PATH
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.Icon = _icon_path()
 
         def Initialize(self) -> None:
             """Register commands; omitted in headless environment."""
