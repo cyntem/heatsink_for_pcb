@@ -201,6 +201,7 @@ class FaceModeTaskPanel:
         self.height_spin.setRange(1.0, 1e6)
         self.height_spin.setDecimals(2)
         self.height_spin.setValue(20.0)
+        self.height_spin.setSingleStep(0.1)
         self.height_spin.setSuffix(" мм")
         self.therm_layout.addRow(self.height_label, self.height_spin)
 
