@@ -1,7 +1,7 @@
 """FreeCAD entry point stub for HeatsinkDesigner workbench."""
 from __future__ import annotations
 
-from importlib import import_module
+import importlib
 
 
 def _load_dependency_status():
@@ -20,7 +20,7 @@ def _load_dependency_status():
     except ImportError:
         # ``thermal_model`` sits next to this file, so absolute import works
         # even when Python does not treat it as a package yet.
-        return import_module("thermal_model").dependency_status
+        return importlib.import_module("thermal_model").dependency_status
 
 
 dependency_status = _load_dependency_status()
