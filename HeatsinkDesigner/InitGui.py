@@ -2,9 +2,25 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
-FREECAD_AVAILABLE = importlib.util.find_spec("FreeCADGui") is not None
+def _has_freecad_gui() -> bool:
+    """Safely detect FreeCAD GUI availability.
+
+    FreeCAD 1.0.2 sometimes preloads ``FreeCADGui`` with ``__spec__`` set to
+    ``None``. ``importlib.util.find_spec`` raises a ``ValueError`` in that
+    case, so we fall back to checking ``sys.modules``.
+    """
+
+    try:
+        spec = importlib.util.find_spec("FreeCADGui")
+    except ValueError:
+        return "FreeCADGui" in sys.modules
+    return spec is not None
+
+
+FREECAD_AVAILABLE = _has_freecad_gui()
 
 ICON_PATH = str(Path(__file__).parent / "icons" / "heatsink.svg")
 

@@ -28,9 +28,13 @@
 
 ## Установка и запуск в FreeCAD
 
-1. Скопируйте папку `HeatsinkDesigner` в каталог `Mod` вашего FreeCAD (`~/.local/share/FreeCAD/Mod` или аналогичный путь на вашей ОС).
+1. Скопируйте папку `HeatsinkDesigner` в каталог `Mod` вашего FreeCAD:
+   - для классических установок: `~/.local/share/FreeCAD/Mod` (Linux), `%APPDATA%/FreeCAD/Mod` (Windows), `~/Library/Preferences/FreeCAD/Mod` (macOS);
+   - для Snap-пакета FreeCAD 1.0.2: `~/snap/freecad/common/Mod`.
 2. Перезапустите FreeCAD. В списке Workbench появится запись **HeatsinkDesigner** с двумя командами: генерация по грани/эскизу и по габаритам.
 3. В каждом Task Panel вы увидите параметры выбранного типа радиатора и кнопки для генерации модели, расчёта теплового режима и построения графика.
+
+> Начиная с FreeCAD 1.0.2 модуль корректно инициализируется, даже если `FreeCADGui.__spec__` не задан (типичный случай в Snap-сборке).
 
 ## Использование без FreeCAD
 
