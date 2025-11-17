@@ -2,9 +2,36 @@
 from __future__ import annotations
 
 import os
+from importlib import util
+
 import FreeCADGui as Gui  # FreeCAD GUI API
 
-from .gui_commands import COMMANDS
+
+def _load_gui_commands():
+    """Return COMMANDS mapping even when module is executed as a script.
+
+    FreeCAD sometimes executes ``InitGui.py`` without treating the folder as
+    an installed package, which breaks relative imports.  This helper loads
+    ``gui_commands`` via a file spec when ``__package__`` is unset, keeping
+    the workbench importable in both contexts.
+    """
+
+    if __package__:
+        from .gui_commands import COMMANDS  # type: ignore[attr-defined]
+
+        return COMMANDS
+
+    module_path = os.path.join(os.path.dirname(__file__), "gui_commands.py")
+    spec = util.spec_from_file_location("gui_commands", module_path)
+    if spec and spec.loader:
+        module = util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.COMMANDS
+
+    raise ImportError("Unable to import gui_commands")
+
+
+COMMANDS = _load_gui_commands()
 
 
 class HeatsinkDesignerWorkbench(Gui.Workbench):
