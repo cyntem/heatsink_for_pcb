@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import FreeCADGui as Gui  # FreeCAD GUI API
 
+from .gui_commands import COMMANDS
+
 
 class HeatsinkDesignerWorkbench(Gui.Workbench):
     """FreeCAD GUI workbench for parametric heatsink generation."""
@@ -25,8 +27,8 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
 
         self.Icon = os.path.join(base_dir, "icons", "heatsink.svg")
 
-        # сюда позже добавишь свои команды, когда они появятся
-        self.list = []  # например: ["HSD_CreateHeatsink"]
+        # команды, которые отобразятся в панели инструментов и меню
+        self.list = list(COMMANDS.keys())
 
     def Initialize(self):
         """Регистрация команд в FreeCAD.
@@ -34,8 +36,11 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
         FreeCAD вызывает этот метод, когда пользователь впервые переключается
         на этот воркбенч.
         """
-        for cmd in self.list:
-            Gui.addCommand(cmd, None)
+        for cmd_name, cmd_handler in COMMANDS.items():
+            Gui.addCommand(cmd_name, cmd_handler)
+
+        self.appendToolbar("HeatsinkDesigner", self.list)
+        self.appendMenu("&HeatsinkDesigner", self.list)
 
     def GetClassName(self):  # noqa: N802
         # Для чисто питонового воркбенча нужно вернуть именно эту строку
