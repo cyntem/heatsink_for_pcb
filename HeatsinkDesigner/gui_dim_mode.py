@@ -94,10 +94,10 @@ class DimensionModeTaskPanel:
         layout.addWidget(header)
 
         hint = QtWidgets.QLabel(
-            "Введите габариты радиатора. В блоке тепловых параметров:\n"
+            "Введите габариты радиатора. В тепловых параметрах:\n"
             "  1) ΔT — допустимый перегрев;\n"
             "  2) режим анализа — P_load по высоте или высота по P_load;\n"
-            "  3) в зависимости от режима — либо высота, либо P_load.\n"
+            "  3) в зависимости от режима задаётся либо P_load, либо высота.\n"
             "Результат пересчитывается автоматически, кнопка строит 3D-модель."
         )
         hint.setWordWrap(True)
@@ -125,15 +125,9 @@ class DimensionModeTaskPanel:
         self.base_thickness_spin.setSuffix(" мм")
         dims_layout.addRow("Толщина основания:", self.base_thickness_spin)
 
-        self.hmax_spin = QtWidgets.QDoubleSpinBox()
-        self.hmax_spin.setRange(1.0, 1e6)
-        self.hmax_spin.setValue(25.0)
-        self.hmax_spin.setSuffix(" мм")
-        dims_layout.addRow("Допустимая высота H_max:", self.hmax_spin)
-
         layout.addWidget(dims_group)
 
-        # Тепловые параметры и мощность
+        # Тепловые параметры
         therm_group = QtWidgets.QGroupBox("Тепловые параметры")
         self.therm_layout = QtWidgets.QFormLayout(therm_group)
 
@@ -148,7 +142,7 @@ class DimensionModeTaskPanel:
         self.analysis_mode_combo.addItem("Рассчитать высоту по P_load", userData="q_to_h")
         self.therm_layout.addRow("Режим анализа:", self.analysis_mode_combo)
 
-        # динамический параметр: P_load или высота
+        # параметр в зависимости от режима
         self.power_label = QtWidgets.QLabel("P_load:")
         self.power_spin = QtWidgets.QDoubleSpinBox()
         self.power_spin.setRange(0.0, 1e6)
@@ -201,12 +195,11 @@ class DimensionModeTaskPanel:
 
         layout.addStretch(1)
 
-        # Сигналы для авто-пересчёта
+        # Автопересчёт
         for spin in (
             self.length_spin,
             self.width_spin,
             self.base_thickness_spin,
-            self.hmax_spin,
             self.delta_t_spin,
             self.power_spin,
             self.height_spin,
@@ -222,13 +215,14 @@ class DimensionModeTaskPanel:
     # ----------------------------------------------------------- helpers -----
     def _on_analysis_mode_changed(self, index: int) -> None:
         mode = self.analysis_mode_combo.currentData()
-        # по высоте → считаем P_load → показываем высоту
         if mode == "h_to_q":
+            # считаем P_load по высоте → высота видна
             self.power_label.setVisible(False)
             self.power_spin.setVisible(False)
             self.height_label.setVisible(True)
             self.height_spin.setVisible(True)
         else:
+            # считаем высоту по P_load → P_load виден
             self.power_label.setVisible(True)
             self.power_spin.setVisible(True)
             self.height_label.setVisible(False)
@@ -247,21 +241,67 @@ class DimensionModeTaskPanel:
         return DimensionInput(length_mm=length, width_mm=width, base_thickness_mm=base_t)
 
     def _default_params_for_type(
-        self, type_key: str, dim: DimensionInput, h_max: float, use_height_spin: bool
+        self, type_key: str, dim: DimensionInput, use_height_spin: bool
     ) -> Dict[str, float]:
         params = dict(DEFAULT_CNC_PARAMS.get(type_key, {}))
-        allowed_height = max(h_max - dim.base_thickness_mm, 1.0)
         hp = HEIGHT_PARAM_MAP.get(type_key)
-
-        for name in ("fin_height_mm", "pin_height_mm", "base_thickness_mm"):
-            if name in params:
-                params[name] = min(params[name], allowed_height)
-
         if use_height_spin and hp:
-            params[hp] = min(float(self.height_spin.value()), allowed_height)
+            params[hp] = float(self.height_spin.value())
         return params
 
     # ----------------------------------------------------- core computation ---
+    def _find_height_for_type(
+        self,
+        type_key: str,
+        dim: DimensionInput,
+        delta_t: float,
+        p_req: float,
+    ) -> Optional[float]:
+        """Найти высоту для данного типа по требуемой мощности (без H_max)."""
+        env = Environment()
+        hp = HEIGHT_PARAM_MAP.get(type_key)
+        if not hp:
+            return None
+
+        params_base = self._default_params_for_type(type_key, dim, use_height_spin=False)
+        H_CAP = 1000.0  # 1 м считаем "бесконечностью"
+
+        def q_for_height(h_mm: float) -> float:
+            p = dict(params_base)
+            p[hp] = h_mm
+            details = build_geometry(type_key, dim.to_tuple(), p)
+            res = estimate_heat_dissipation(
+                details.geometry, env, power_input_w=None, target_overtemp_c=delta_t
+            )
+            return res.heat_dissipation_w
+
+        h = max(float(self.height_spin.value()), 1.0)
+        q = q_for_height(h)
+        if q >= p_req:
+            return h
+
+        # Адаптивное расширение
+        h_low = h
+        q_low = q
+        h_high = h * 2.0
+
+        while h_high <= H_CAP:
+            q_high = q_for_height(h_high)
+            if q_high >= p_req:
+                # бинарный поиск
+                for _ in range(20):
+                    h_mid = 0.5 * (h_low + h_high)
+                    q_mid = q_for_height(h_mid)
+                    if q_mid >= p_req:
+                        h_high = h_mid
+                    else:
+                        h_low = h_mid
+                return h_high
+            h_low = h_high
+            h_high *= 2.0
+
+        return None
+
     def _compute_best_config(
         self,
     ) -> Tuple[Optional[str], Optional[Dict[str, float]], Optional[GeometryDetails], str]:
@@ -270,15 +310,6 @@ class DimensionModeTaskPanel:
         if dim is None:
             return None, None, None, "Некорректные габариты."
 
-        h_max = float(self.hmax_spin.value())
-        if h_max <= dim.base_thickness_mm:
-            return (
-                None,
-                None,
-                None,
-                "H_max должен быть больше толщины основания.",
-            )
-
         delta_t = float(self.delta_t_spin.value())
         env = Environment()
         mode = self.analysis_mode_combo.currentData()
@@ -286,9 +317,7 @@ class DimensionModeTaskPanel:
         auto_mode = current_data == "__auto__"
         p_req = float(self.power_spin.value())
 
-        use_height_spin = mode == "h_to_q"
-
-        # ----- режим: по высоте → P_load (Q_max) -----
+        # ----- режим: P_load по высоте -----
         if mode == "h_to_q":
             best_type_key: Optional[str] = None
             best_params: Optional[Dict[str, float]] = None
@@ -297,7 +326,9 @@ class DimensionModeTaskPanel:
 
             type_list = self._type_keys if auto_mode else [str(current_data)]
             for type_key in type_list:
-                params = self._default_params_for_type(type_key, dim, h_max, use_height_spin=True)
+                params = self._default_params_for_type(
+                    type_key, dim, use_height_spin=True
+                )
                 try:
                     details = build_geometry(type_key, dim.to_tuple(), params)
                     res = estimate_heat_dissipation(
@@ -326,76 +357,52 @@ class DimensionModeTaskPanel:
             )
             return best_type_key, best_params, best_details, text
 
-        # ----- режим: по мощности → высоту -----
+        # ----- режим: высота по P_load -----
         if p_req <= 0.0:
             return None, None, None, "Режим: высота по P_load. Задайте P_load > 0 Вт."
 
-        def find_height_for_type(type_key: str):
-            params_base = self._default_params_for_type(type_key, dim, h_max, use_height_spin=False)
-            hp = HEIGHT_PARAM_MAP.get(type_key)
-            if not hp:
-                return None, None, None
-            h_min = 1.0
-            h_max_eff = max(h_max - dim.base_thickness_mm, h_min + 1.0)
-            steps = 25
-            best_h_local: Optional[float] = None
-            best_details_local: Optional[GeometryDetails] = None
-            for i in range(steps):
-                h = h_min + (h_max_eff - h_min) * i / (steps - 1)
-                params = dict(params_base)
-                params[hp] = h
-                details = build_geometry(type_key, dim.to_tuple(), params)
-                res = estimate_heat_dissipation(
-                    details.geometry,
-                    env,
-                    power_input_w=None,
-                    target_overtemp_c=delta_t,
-                )
-                if res.heat_dissipation_w >= p_req:
-                    best_h_local = h
-                    best_details_local = details
-                    break
-            return best_h_local, params_base, best_details_local
-
-        best_type_key: Optional[str] = None
-        best_params: Optional[Dict[str, float]] = None
-        best_details: Optional[GeometryDetails] = None
-        best_h: Optional[float] = None
-
         type_list = self._type_keys if auto_mode else [str(current_data)]
 
+        best_type_key: Optional[str] = None
+        best_h: Optional[float] = None
+
         for type_key in type_list:
-            h_local, params_base, details_local = find_height_for_type(type_key)
-            if h_local is None or params_base is None or details_local is None:
+            if type_key == "solid_plate":
+                # для пластины подбор по высоте не очень осмыслен
+                continue
+            h_local = self._find_height_for_type(type_key, dim, delta_t, p_req)
+            if h_local is None:
                 continue
             if best_h is None or h_local < best_h:
                 best_h = h_local
                 best_type_key = type_key
-                best_params = params_base
-                best_details = details_local
 
-        if best_type_key is None or best_params is None or best_details is None or best_h is None:
+        if best_type_key is None or best_h is None:
             return (
                 None,
                 None,
                 None,
                 "Не удалось подобрать тип и высоту для заданной мощности.\n"
-                "Увеличьте H_max или уменьшите P_load.",
+                "Уменьшите P_load или увеличьте площадь основания.",
             )
 
         # Округляем высоту и пересчитываем Q_max
         hp_final = HEIGHT_PARAM_MAP.get(best_type_key)
+        params = self._default_params_for_type(
+            best_type_key, dim, use_height_spin=False
+        )
         if hp_final:
             h_round = max(1.0, round(best_h))
-            best_params[hp_final] = h_round
-            best_details = build_geometry(best_type_key, dim.to_tuple(), best_params)
+            params[hp_final] = h_round
+            details = build_geometry(best_type_key, dim.to_tuple(), params)
             res = estimate_heat_dissipation(
-                best_details.geometry,
+                details.geometry,
                 env,
                 power_input_w=None,
                 target_overtemp_c=delta_t,
             )
-            # обновим height_spin, чтобы при переключении режима было видно
+
+            # обновим высоту в UI
             self.height_spin.blockSignals(True)
             self.height_spin.setValue(h_round)
             self.height_spin.blockSignals(False)
@@ -408,23 +415,21 @@ class DimensionModeTaskPanel:
                 f"для P_load = {p_req:.1f} Вт и ΔT = {delta_t:.1f} °C.\n"
                 f"Q_max при этой высоте ≈ {res.heat_dissipation_w:.1f} Вт."
             )
-            return best_type_key, best_params, best_details, text
+            return best_type_key, params, details, text
 
         return None, None, None, "Не удалось вычислить высоту."
 
     # ----------------------------------------------------- label + 3D --------
     def _update_result_label(self) -> None:
-        """Пересчитать и показать только текст (без генерации 3D)."""
         type_key, params, details, text = self._compute_best_config()
         self.result_label.setText(text)
 
     def _on_generate_clicked(self) -> None:
-        """Подобрать конфигурацию и сгенерировать 3D-модель."""
         QtWidgets = self._QtWidgets
         type_key, params, details, text = self._compute_best_config()
         self.result_label.setText(text)
 
-        if type_key is None or params is None or details is None:
+        if type_key is None or params is None:
             return
 
         dim = self._dimension_input()
@@ -474,15 +479,6 @@ class DimensionModeTaskPanel:
         if dim is None:
             return
 
-        h_max = float(self.hmax_spin.value())
-        if h_max <= dim.base_thickness_mm:
-            QtWidgets.QMessageBox.warning(
-                self.form,
-                "HeatsinkDesigner",
-                "H_max меньше или равен толщине основания.",
-            )
-            return
-
         try:
             import matplotlib.pyplot as plt  # type: ignore[import]
         except ImportError:
@@ -496,19 +492,26 @@ class DimensionModeTaskPanel:
         env = Environment()
         delta_t = float(self.delta_t_spin.value())
 
+        H_PLOT_MAX = 100.0  # мм – диапазон для графика
         h_min = 1.0
-        h_max_eff = max(h_max - dim.base_thickness_mm, h_min + 1.0)
+        h_max = max(float(self.height_spin.value()) * 2.0, H_PLOT_MAX)
         steps = 12
         heights: List[float] = [
-            h_min + (h_max_eff - h_min) * i / (steps - 1) for i in range(steps)
+            h_min + (h_max - h_min) * i / (steps - 1) for i in range(steps)
         ]
 
         for type_key in self._type_keys:
+            if type_key == "solid_plate":
+                continue  # нет реальной "высоты рёбер"
             hp = HEIGHT_PARAM_MAP.get(type_key)
             if not hp:
                 continue
-            params_base = self._default_params_for_type(type_key, dim, h_max, use_height_spin=False)
+
+            params_base = self._default_params_for_type(
+                type_key, dim, use_height_spin=False
+            )
             q_values: List[float] = []
+
             for h in heights:
                 params = dict(params_base)
                 params[hp] = h

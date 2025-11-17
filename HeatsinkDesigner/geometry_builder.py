@@ -1,10 +1,10 @@
-"""Geometry helpers for heatsink shapes and (опционально) 3D-модели FreeCAD."""
+"""Geometry helpers for heatsink area estimation and FreeCAD solid creation."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
-# ---- устойчивые импорты других модулей пакета ------------------------------
+# Вместо относительных импортов — абсолютные + fallback
 try:
     from HeatsinkDesigner.cnc_defaults import DEFAULT_CNC_PARAMS
 except ImportError:
@@ -25,21 +25,9 @@ except ImportError:
         estimate_fin_efficiency,
     )
 
-# ---- необязательная зависимость от FreeCAD/Part ----------------------------
-try:  # pragma: no cover - в тестах FreeCAD скорее всего недоступен
-    import FreeCAD as App  # type: ignore[import]
-    import Part  # type: ignore[import]
-
-    FREECAD_AVAILABLE = True
-except Exception:  # pragma: no cover
-    App = None  # type: ignore[assignment]
-    Part = None  # type: ignore[assignment]
-    FREECAD_AVAILABLE = False
-
-
-# ============================================================================
-#  Базовые структуры
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Аналитическая геометрия (для тепловых расчётов)
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -74,11 +62,6 @@ def _characteristic_length(base: BaseDimensions) -> float:
     return max(convert_mm_to_m(base.length_mm), convert_mm_to_m(base.width_mm))
 
 
-# ============================================================================
-#  Геометрия для теплового расчёта (без FreeCAD)
-# ============================================================================
-
-
 def build_solid_plate(base: BaseDimensions) -> GeometryDetails:
     """Return geometry summary for a solid plate heatsink."""
 
@@ -109,6 +92,9 @@ def build_straight_fins(
 
     pitch_mm = fin_thickness_mm + fin_gap_mm
     usable_width_mm = base.width_mm - fin_gap_mm
+    if pitch_mm <= 0 or usable_width_mm <= 0:
+        raise ValueError("Invalid fin pitch or width for straight fins")
+
     fin_count = int(usable_width_mm // pitch_mm) + 1
     fin_area_m2 = fin_count * 2 * convert_mm_to_m(fin_height_mm) * convert_mm_to_m(
         base.length_mm
@@ -149,6 +135,9 @@ def build_crosscut(
         _validate_positive(value, name)
 
     pitch_mm = pin_size_mm + groove_width_mm
+    if pitch_mm <= 0:
+        raise ValueError("Invalid pitch in crosscut geometry")
+
     count_x = int((base.length_mm + groove_width_mm) // pitch_mm)
     count_y = int((base.width_mm + groove_width_mm) // pitch_mm)
     pin_count = max(count_x, 1) * max(count_y, 1)
@@ -255,113 +244,133 @@ def build_geometry(
     raise ValueError(f"Unknown heatsink type: {heatsink_type}")
 
 
-# ============================================================================
-#  3D-геометрия FreeCAD
-# ============================================================================
+# ---------------------------------------------------------------------------
+# 3D-геометрия в FreeCAD: построение по прямоугольнику или произвольному
+# контуру (face/sketch)
+# ---------------------------------------------------------------------------
 
 
-def _require_freecad() -> None:
-    if not FREECAD_AVAILABLE:
-        raise RuntimeError(
-            "FreeCAD/Part недоступны. Запустите код внутри FreeCAD или установите FreeCAD Python."
-        )
+def _profile_to_face(profile_shape, base: BaseDimensions):
+    """Преобразовать выбранный профиль (face/sketch) в Part.Face.
+
+    Если что-то пошло не так, возвращаем прямоугольную плоскость L×W.
+    """
+    try:
+        import Part  # type: ignore
+    except Exception as exc:  # pragma: no cover - используется только в FreeCAD
+        raise RuntimeError("Модуль Part недоступен") from exc
+
+    if profile_shape is None:
+        return Part.makePlane(base.length_mm, base.width_mm)
+
+    shape = profile_shape
+    # Если это объект документа (Sketch и т.п.)
+    if hasattr(shape, "Shape"):
+        shape = shape.Shape  # type: ignore[assignment]
+
+    # Если есть список граней — берём первую
+    try:
+        if hasattr(shape, "Faces") and shape.Faces:  # type: ignore[attr-defined]
+            return shape.Faces[0]  # type: ignore[index]
+    except Exception:
+        pass
+
+    # Если есть внешняя проволока (OuterWire)
+    try:
+        if hasattr(shape, "OuterWire"):  # type: ignore[attr-defined]
+            return Part.Face(shape.OuterWire)  # type: ignore[arg-type]
+    except Exception:
+        pass
+
+    # Последний шанс — пытаемся сделать Face прямо из shape
+    try:
+        return Part.Face(shape)  # type: ignore[arg-type]
+    except Exception:
+        # Совсем fallback: простая плоскость
+        return Part.makePlane(base.length_mm, base.width_mm)
 
 
-def _make_base_shape(base: BaseDimensions):
-    _require_freecad()
-    return Part.makeBox(base.length_mm, base.width_mm, base.base_thickness_mm)
+def _create_fins_solid(
+    Part, App, heatsink_type: str, base: BaseDimensions, params: Dict[str, float], bb
+) -> Tuple[Optional[object], float]:
+    """Создать объединённый solid всех рёбер/пинов и вернуть (solid, высота_ребра_мм).
 
+    Если рёбра не нужны (solid plate) — вернуть (None, 0.0).
+    """
+    x0 = bb.XMin
+    y0 = bb.YMin
+    L = bb.XLength
+    W = bb.YLength
+    z_base = base.base_thickness_mm
 
-def _shape_solid_plate(base: BaseDimensions):
-    return _make_base_shape(base)
+    solids: List[object] = []
+    max_height = 0.0
 
+    if heatsink_type == "straight_fins":
+        fin_t = float(params["fin_thickness_mm"])
+        fin_gap = float(params["fin_gap_mm"])
+        fin_h = float(params["fin_height_mm"])
+        pitch = fin_t + fin_gap
+        usable_width = W - fin_gap
+        if pitch <= 0 or usable_width <= 0:
+            return None, 0.0
+        fin_count = int(usable_width // pitch) + 1
+        for i in range(fin_count):
+            y = y0 + fin_gap + i * pitch
+            box = Part.makeBox(L, fin_t, fin_h)
+            box.Placement.Base = App.Vector(x0, y, z_base)
+            solids.append(box)
+        max_height = fin_h
 
-def _shape_straight_fins(
-    base: BaseDimensions,
-    fin_height_mm: float,
-    fin_thickness_mm: float,
-    fin_gap_mm: float,
-):
-    _require_freecad()
-    base_shape = _make_base_shape(base)
-    shape = base_shape
+    elif heatsink_type == "crosscut":
+        groove = float(params["groove_width_mm"])
+        pin_size = float(params["pin_size_mm"])
+        pin_h = float(params["pin_height_mm"])
+        pitch = groove + pin_size
+        if pitch <= 0:
+            return None, 0.0
+        count_x = int((L + groove) // pitch)
+        count_y = int((W + groove) // pitch)
+        count_x = max(count_x, 1)
+        count_y = max(count_y, 1)
+        for ix in range(count_x):
+            for iy in range(count_y):
+                x = x0 + groove + ix * pitch
+                y = y0 + groove + iy * pitch
+                box = Part.makeBox(pin_size, pin_size, pin_h)
+                box.Placement.Base = App.Vector(x, y, z_base)
+                solids.append(box)
+        max_height = pin_h
 
-    pitch = fin_thickness_mm + fin_gap_mm
-    # Кол-во рёбер — чтобы всё более-менее влезло
-    fin_count = max(int((base.width_mm + fin_gap_mm) // pitch), 1)
+    elif heatsink_type == "pin_fin":
+        pin_size = float(params["pin_size_mm"])
+        pitch = float(params["pitch_mm"])
+        pin_h = float(params["pin_height_mm"])
+        if pitch <= 0:
+            return None, 0.0
+        count_x = int((L + pitch - pin_size) // pitch)
+        count_y = int((W + pitch - pin_size) // pitch)
+        count_x = max(count_x, 1)
+        count_y = max(count_y, 1)
+        for ix in range(count_x):
+            for iy in range(count_y):
+                x = x0 + ix * pitch
+                y = y0 + iy * pitch
+                box = Part.makeBox(pin_size, pin_size, pin_h)
+                box.Placement.Base = App.Vector(x, y, z_base)
+                solids.append(box)
+        max_height = pin_h
 
-    total_fins_width = fin_count * fin_thickness_mm + (fin_count - 1) * fin_gap_mm
-    y0 = (base.width_mm - total_fins_width) / 2.0
+    else:
+        return None, 0.0
 
-    for i in range(fin_count):
-        y = y0 + i * (fin_thickness_mm + fin_gap_mm)
-        fin_box = Part.makeBox(base.length_mm, fin_thickness_mm, fin_height_mm)
-        fin_box.translate(App.Vector(0.0, y, base.base_thickness_mm))
-        shape = shape.fuse(fin_box)
+    if not solids:
+        return None, 0.0
 
-    return shape
-
-
-def _shape_crosscut(
-    base: BaseDimensions,
-    pin_height_mm: float,
-    pin_size_mm: float,
-    groove_width_mm: float,
-):
-    _require_freecad()
-    base_shape = _make_base_shape(base)
-    shape = base_shape
-
-    pitch = pin_size_mm + groove_width_mm
-
-    count_x = max(int((base.length_mm + groove_width_mm) // pitch), 1)
-    count_y = max(int((base.width_mm + groove_width_mm) // pitch), 1)
-
-    total_x = count_x * pin_size_mm + (count_x - 1) * groove_width_mm
-    total_y = count_y * pin_size_mm + (count_y - 1) * groove_width_mm
-
-    x0 = (base.length_mm - total_x) / 2.0
-    y0 = (base.width_mm - total_y) / 2.0
-
-    for ix in range(count_x):
-        for iy in range(count_y):
-            x = x0 + ix * (pin_size_mm + groove_width_mm)
-            y = y0 + iy * (pin_size_mm + groove_width_mm)
-            pin_box = Part.makeBox(pin_size_mm, pin_size_mm, pin_height_mm)
-            pin_box.translate(App.Vector(x, y, base.base_thickness_mm))
-            shape = shape.fuse(pin_box)
-
-    return shape
-
-
-def _shape_pin_fin(
-    base: BaseDimensions,
-    pin_height_mm: float,
-    pin_size_mm: float,
-    pitch_mm: float,
-):
-    _require_freecad()
-    base_shape = _make_base_shape(base)
-    shape = base_shape
-
-    count_x = max(int((base.length_mm + pitch_mm - pin_size_mm) // pitch_mm), 1)
-    count_y = max(int((base.width_mm + pitch_mm - pin_size_mm) // pitch_mm), 1)
-
-    total_x = (count_x - 1) * pitch_mm + pin_size_mm
-    total_y = (count_y - 1) * pitch_mm + pin_size_mm
-
-    x0 = (base.length_mm - total_x) / 2.0
-    y0 = (base.width_mm - total_y) / 2.0
-
-    for ix in range(count_x):
-        for iy in range(count_y):
-            x = x0 + ix * pitch_mm
-            y = y0 + iy * pitch_mm
-            pin_box = Part.makeBox(pin_size_mm, pin_size_mm, pin_height_mm)
-            pin_box.translate(App.Vector(x, y, base.base_thickness_mm))
-            shape = shape.fuse(pin_box)
-
-    return shape
+    fins_solid = solids[0]
+    for s in solids[1:]:
+        fins_solid = fins_solid.fuse(s)
+    return fins_solid, max_height
 
 
 def create_heatsink_solid(
@@ -369,48 +378,66 @@ def create_heatsink_solid(
     base: BaseDimensions,
     params: Dict[str, float],
     doc=None,
-    name_prefix: str = "Heatsink",
+    profile_shape=None,
 ):
     """Создать 3D-модель радиатора в FreeCAD.
 
-    Возвращает объект документа (Part::Feature). Работает только если
-    FreeCAD/Part доступны, иначе бросает RuntimeError.
+    - Если profile_shape задан (face/sketch), основание и рёбра обрезаются
+      по произвольному контуру.
+    - Если profile_shape = None, используется прямоугольник длиной/шириной
+      BaseDimensions.
     """
-    _require_freecad()
+    try:
+        import FreeCAD as App  # type: ignore
+        import Part  # type: ignore
+    except Exception as exc:  # pragma: no cover - выполняется только в FreeCAD
+        raise RuntimeError(
+            "Создание 3D-геометрии возможно только внутри FreeCAD"
+        ) from exc
 
-    doc = doc or App.ActiveDocument
     if doc is None:
-        doc = App.newDocument()
+        doc = App.ActiveDocument or App.newDocument("HeatsinkDesigner")
 
-    # Выбор формы по типу
+    base_face = _profile_to_face(profile_shape, base)
+    normal = App.Vector(0, 0, 1)
+
+    # Основание
+    base_solid = base_face.extrude(normal * base.base_thickness_mm)
+
+    # Просто пластина
     if heatsink_type == "solid_plate":
-        shape = _shape_solid_plate(base)
-    elif heatsink_type == "straight_fins":
-        shape = _shape_straight_fins(
-            base,
-            fin_height_mm=float(params["fin_height_mm"]),
-            fin_thickness_mm=float(params["fin_thickness_mm"]),
-            fin_gap_mm=float(params["fin_gap_mm"]),
-        )
-    elif heatsink_type == "crosscut":
-        shape = _shape_crosscut(
-            base,
-            pin_height_mm=float(params["pin_height_mm"]),
-            pin_size_mm=float(params["pin_size_mm"]),
-            groove_width_mm=float(params["groove_width_mm"]),
-        )
-    elif heatsink_type == "pin_fin":
-        shape = _shape_pin_fin(
-            base,
-            pin_height_mm=float(params["pin_height_mm"]),
-            pin_size_mm=float(params["pin_size_mm"]),
-            pitch_mm=float(params["pitch_mm"]),
-        )
-    else:
-        raise ValueError(f"Unknown heatsink type: {heatsink_type}")
+        obj = doc.addObject("Part::Feature", "Heatsink_SolidPlate")
+        obj.Label = "Heatsink solid plate"
+        obj.Shape = base_solid
+        doc.recompute()
+        return obj
 
-    obj = doc.addObject("Part::Feature", f"{name_prefix}_{heatsink_type}")
-    obj.Label = f"Heatsink ({heatsink_type})"
-    obj.Shape = shape
+    # Рёбра/пины
+    fins_solid, fin_height_mm = _create_fins_solid(
+        Part, App, heatsink_type, base, params, base_face.BoundBox
+    )
+    if fins_solid is None or fin_height_mm <= 0:
+        obj = doc.addObject("Part::Feature", "Heatsink_BaseOnly")
+        obj.Label = "Heatsink base only"
+        obj.Shape = base_solid
+        doc.recompute()
+        return obj
+
+    # Призма по контуру для обрезки рёбер по произвольному контуру
+    total_height = base.base_thickness_mm + fin_height_mm
+    contour_prism = base_face.extrude(normal * total_height)
+
+    fins_trimmed = fins_solid.common(contour_prism)
+    result_solid = base_solid.fuse(fins_trimmed)
+
+    name_prefix = {
+        "straight_fins": "Heatsink_StraightFins",
+        "crosscut": "Heatsink_Crosscut",
+        "pin_fin": "Heatsink_PinFin",
+    }.get(heatsink_type, "Heatsink")
+
+    obj = doc.addObject("Part::Feature", name_prefix)
+    obj.Label = name_prefix
+    obj.Shape = result_solid
     doc.recompute()
     return obj
