@@ -1,10 +1,15 @@
+#heatsink_types.py
 """Definitions for supported heatsink types and their parameter schemas."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from . import cnc_defaults
+# ---- устойчивый импорт cnc_defaults ----------------------------------------
+try:
+    from HeatsinkDesigner import cnc_defaults
+except ImportError:
+    import cnc_defaults
 
 
 @dataclass

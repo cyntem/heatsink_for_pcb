@@ -1,8 +1,8 @@
 """FreeCAD GUI commands for HeatsinkDesigner Workbench."""
 from __future__ import annotations
 
-from importlib import import_module, util
 from typing import Protocol
+import importlib
 
 
 class _Command(Protocol):
@@ -18,61 +18,6 @@ class _Command(Protocol):
         ...
 
 
-def _load_gui_module():
-    """Return FreeCADGui module when available."""
-
-    spec = util.find_spec("FreeCADGui")
-    if spec is None:
-        raise ImportError("FreeCADGui module is not available")
-    return import_module("FreeCADGui")
-
-
-def _load_qt_widgets():
-    """Return QtWidgets module from PySide6/PySide2."""
-
-    for candidate in ("PySide6", "PySide2"):
-        if util.find_spec(candidate) is not None:
-            return import_module(f"{candidate}.QtWidgets")
-    raise ImportError("Neither PySide6 nor PySide2 is available for GUI")
-
-
-def _build_placeholder_panel(title: str, description: str):
-    """Return a simple QWidget with a couple of action buttons.
-
-    The buttons are placeholders and only show status messages so that
-    the Workbench exposes visible controls in the Task Panel even
-    without a fully featured GUI implementation.
-    """
-
-    QtWidgets = _load_qt_widgets()
-
-    widget = QtWidgets.QWidget()
-    layout = QtWidgets.QVBoxLayout(widget)
-
-    header = QtWidgets.QLabel(f"<b>{title}</b>")
-    header.setWordWrap(True)
-    layout.addWidget(header)
-
-    hint = QtWidgets.QLabel(description)
-    hint.setWordWrap(True)
-    layout.addWidget(hint)
-
-    button_row = QtWidgets.QHBoxLayout()
-
-    generate_btn = QtWidgets.QPushButton("Сгенерировать 3D-модель")
-    heat_btn = QtWidgets.QPushButton("Рассчитать тепло")
-    chart_btn = QtWidgets.QPushButton("График (T, RH)")
-
-    for btn in (generate_btn, heat_btn, chart_btn):
-        btn.setToolTip("Заглушка кнопки: подключите позже к логике контроллеров")
-        button_row.addWidget(btn)
-
-    layout.addLayout(button_row)
-
-    layout.addStretch(1)
-    return widget
-
-
 class _BaseCommand:
     """Shared helpers for GUI commands."""
 
@@ -86,16 +31,55 @@ class _BaseCommand:
         return {"MenuText": self._name, "ToolTip": self._tooltip}
 
     def Activated(self):  # noqa: N802
-        Gui = _load_gui_module()
-        panel = _build_placeholder_panel(self._panel_title, self._panel_description)
-        Gui.Control.showDialog(panel)
+        # Переопределяется в наследниках
+        pass
 
     def IsActive(self) -> bool:  # noqa: N802
-        try:
-            _load_gui_module()
-        except ImportError:
-            return False
+        # Внутри GUI FreeCAD команды всегда активны
         return True
+
+
+def _import_face_panel():
+    """Загрузить FaceModeTaskPanel независимо от того, как подключён модуль."""
+    last_exc = None
+
+    # 1) Пакет HeatsinkDesigner
+    try:
+        module = importlib.import_module("HeatsinkDesigner.gui_face_mode")
+        return module.FaceModeTaskPanel
+    except Exception as exc:
+        last_exc = exc
+
+    # 2) Модуль gui_face_mode в той же папке (FreeCAD добавил её в sys.path)
+    try:
+        module = importlib.import_module("gui_face_mode")
+        return module.FaceModeTaskPanel
+    except Exception as exc:
+        last_exc = exc
+
+    # Если совсем не получилось — кидаем то, что есть
+    raise ImportError(f"Cannot import FaceModeTaskPanel: {last_exc}")
+
+
+def _import_dim_panel():
+    """Загрузить DimensionModeTaskPanel независимо от способа импорта."""
+    last_exc = None
+
+    # 1) Пакет HeatsinkDesigner
+    try:
+        module = importlib.import_module("HeatsinkDesigner.gui_dim_mode")
+        return module.DimensionModeTaskPanel
+    except Exception as exc:
+        last_exc = exc
+
+    # 2) Модуль gui_dim_mode в той же папке
+    try:
+        module = importlib.import_module("gui_dim_mode")
+        return module.DimensionModeTaskPanel
+    except Exception as exc:
+        last_exc = exc
+
+    raise ImportError(f"Cannot import DimensionModeTaskPanel: {last_exc}")
 
 
 class HeatsinkFromFaceCommand(_BaseCommand):
@@ -112,6 +96,20 @@ class HeatsinkFromFaceCommand(_BaseCommand):
             ),
         )
 
+    def Activated(self):  # noqa: N802
+        import FreeCADGui as Gui  # type: ignore[import]
+
+        try:
+            FaceModeTaskPanel = _import_face_panel()
+        except ImportError as exc:
+            Gui.doCommand(
+                'print("HeatsinkDesigner: cannot import FaceModeTaskPanel:", %r)' % (exc,)
+            )
+            return
+
+        panel = FaceModeTaskPanel()
+        Gui.Control.showDialog(panel)
+
 
 class HeatsinkByDimensionsCommand(_BaseCommand):
     """Command to start dimension-driven workflow."""
@@ -126,6 +124,20 @@ class HeatsinkByDimensionsCommand(_BaseCommand):
                 "для генерации, расчётов и построения графиков."
             ),
         )
+
+    def Activated(self):  # noqa: N802
+        import FreeCADGui as Gui  # type: ignore[import]
+
+        try:
+            DimensionModeTaskPanel = _import_dim_panel()
+        except ImportError as exc:
+            Gui.doCommand(
+                'print("HeatsinkDesigner: cannot import DimensionModeTaskPanel:", %r)' % (exc,)
+            )
+            return
+
+        panel = DimensionModeTaskPanel()
+        Gui.Control.showDialog(panel)
 
 
 COMMANDS: dict[str, _Command] = {
