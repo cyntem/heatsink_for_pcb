@@ -26,6 +26,13 @@
 - Python 3.x (используется тот, что встроен в FreeCAD 1.0+).
 - Рекомендуемые внешние пакеты: `numpy`, `matplotlib`, `ht`, `fluids`. При отсутствии `ht` и `fluids` расчёты используют встроённые приближённые коэффициенты.
 
+`requirements.txt` содержит полный список опциональных зависимостей. Их можно установить через встроенный в FreeCAD интерпретатор Python:
+
+- **Windows:** `"C:\\Program Files\\FreeCAD 1.0\\bin\\python.exe" -m pip install -r requirements.txt`
+- **macOS (приложение):** `/Applications/FreeCAD.app/Contents/Resources/bin/python3 -m pip install -r requirements.txt`
+- **Linux (классическая установка):** `python3 -m pip install -r requirements.txt`
+- **Linux Snap:** `snap run --shell freecad --command python3 -m pip install -r requirements.txt`
+
 ## Установка и запуск в FreeCAD
 
 1. Скопируйте папку `HeatsinkDesigner` в каталог `Mod` вашего FreeCAD:
