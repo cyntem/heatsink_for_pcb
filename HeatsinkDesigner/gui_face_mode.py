@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, List
 
-# ---- импорты модулей воркбенча ---------------------------------------------
+# ---------- Импорты модулей воркбенча ---------------------------------------
 try:
     from HeatsinkDesigner.geometry_builder import (
         BaseDimensions,
@@ -12,7 +12,7 @@ try:
         build_geometry,
         create_heatsink_solid,
     )
-except ImportError:
+except ImportError:  # pragma: no cover
     from geometry_builder import (  # type: ignore[no-redef]
         BaseDimensions,
         GeometryDetails,
@@ -22,21 +22,26 @@ except ImportError:
 
 try:
     from HeatsinkDesigner.heatsink_types import SUPPORTED_TYPES
-except ImportError:
+except ImportError:  # pragma: no cover
     from heatsink_types import SUPPORTED_TYPES  # type: ignore[no-redef]
 
 try:
     from HeatsinkDesigner.thermal_model import (
         Environment,
         estimate_heat_dissipation,
+        MATERIALS,
+        DEFAULT_MATERIAL_KEY,
     )
-except ImportError:
+except ImportError:  # pragma: no cover
     from thermal_model import (  # type: ignore[no-redef]
         Environment,
         estimate_heat_dissipation,
+        MATERIALS,
+        DEFAULT_MATERIAL_KEY,
     )
 
-# какой параметр считать "высотой" для каждого типа
+
+# какой параметр считаем "высотой" для каждого типа
 HEIGHT_PARAM_MAP: Dict[str, str] = {
     "solid_plate": "base_thickness_mm",  # для пластины "высота" = толщина
     "straight_fins": "fin_height_mm",
@@ -80,29 +85,40 @@ class FaceSketchController:
         heatsink_type: str,
         params: Dict[str, float],
         base_thickness_mm: float,
+        material_k: float,
     ) -> GeometryDetails:
-        """Построить GeometryDetails и масштабировать тепловые площади по реальной площади контура."""
+        """Построить GeometryDetails и масштабировать площади по реальной площади контура."""
         self.validate_selection()
         if heatsink_type not in SUPPORTED_TYPES:
             raise ValueError("Неизвестный тип радиатора")
-        base_dims = self.selection.base_dimensions(base_thickness_mm)
+
+        sel = self.selection
+        if sel is None:
+            raise ValueError("Нет выделенной поверхности/эскиза")
+
+        base_dims = sel.base_dimensions(base_thickness_mm)
+
+        merged_params = dict(params)
+        merged_params["material_conductivity_w_mk"] = material_k
+
         details = build_geometry(
             heatsink_type,
             (base_dims.length_mm, base_dims.width_mm, base_dims.base_thickness_mm),
-            params,
+            merged_params,
         )
 
-        # Масштабирование по реальной площади face/sketch
-        sel = self.selection
-        if sel is not None and sel.area_mm2 > 0:
+        # Масштабирование по реальной площади face/sketch относительно bounding-box
+        if sel.area_mm2 > 0:
             bbox_area_mm2 = sel.length_mm * sel.width_mm
             if bbox_area_mm2 > 0:
                 scale = sel.area_mm2 / bbox_area_mm2
                 details.geometry.base_area_m2 *= scale
                 details.geometry.effective_area_m2 *= scale
                 details.notes.append(
-                    f"Thermal area scaled by factor {scale:.2f} to match real face/sketch area"
+                    f"Thermal area scaled by factor {scale:.2f} "
+                    f"to match real face/sketch area"
                 )
+
         return details
 
 
@@ -129,6 +145,7 @@ class FaceModeTaskPanel:
         self.controller = FaceSketchController()
 
         self._height_param_name: Optional[str] = None
+        self._current_type_key: str = list(SUPPORTED_TYPES.keys())[0]
 
         self.form = QtWidgets.QWidget()
         self._build_ui()
@@ -181,6 +198,18 @@ class FaceModeTaskPanel:
         self.delta_t_spin.setSuffix(" °C")
         self.therm_layout.addRow("Допустимый перегрев ΔT:", self.delta_t_spin)
 
+        # Материал радиатора
+        self.material_combo = QtWidgets.QComboBox()
+        self._material_keys = list(MATERIALS.keys())
+        for key in self._material_keys:
+            mat = MATERIALS[key]
+            self.material_combo.addItem(mat.label, userData=key)
+        # по умолчанию – Al 6061
+        if DEFAULT_MATERIAL_KEY in self._material_keys:
+            idx = self._material_keys.index(DEFAULT_MATERIAL_KEY)
+            self.material_combo.setCurrentIndex(idx)
+        self.therm_layout.addRow("Материал радиатора:", self.material_combo)
+
         # 2) режим анализа
         self.analysis_mode_combo = QtWidgets.QComboBox()
         self.analysis_mode_combo.addItem("Рассчитать P_load по высоте", userData="h_to_q")
@@ -200,8 +229,8 @@ class FaceModeTaskPanel:
         self.height_spin = QtWidgets.QDoubleSpinBox()
         self.height_spin.setRange(1.0, 1e6)
         self.height_spin.setDecimals(2)
+        self.height_spin.setSingleStep(0.1)  # шаг 0.1 мм
         self.height_spin.setValue(20.0)
-        self.height_spin.setSingleStep(0.1)
         self.height_spin.setSuffix(" мм")
         self.therm_layout.addRow(self.height_label, self.height_spin)
 
@@ -230,12 +259,22 @@ class FaceModeTaskPanel:
         self.delta_t_spin.valueChanged.connect(self._update_result_label)
         self.power_spin.valueChanged.connect(self._update_result_label)
         self.height_spin.valueChanged.connect(self._update_result_label)
+        self.material_combo.currentIndexChanged.connect(self._update_result_label)
         self.analysis_mode_combo.currentIndexChanged.connect(self._on_analysis_mode_changed)
 
         # Инициализация
         self._on_type_changed(self.type_combo.currentIndex())
 
     # ----------------------------------------------------------- helpers -----
+    def _current_material(self):
+        key = self.material_combo.currentData()
+        if not key:
+            key = DEFAULT_MATERIAL_KEY
+        mat = MATERIALS.get(key)
+        if mat is None:
+            mat = MATERIALS[DEFAULT_MATERIAL_KEY]
+        return mat
+
     def _on_analysis_mode_changed(self, index: int) -> None:
         mode = self.analysis_mode_combo.currentData()
         if mode == "h_to_q":
@@ -257,7 +296,7 @@ class FaceModeTaskPanel:
         key = self.type_combo.itemData(index)
         if not key:
             key = self._type_keys[0]
-        self._current_type_key: str = key
+        self._current_type_key = key
 
         hs_type = SUPPORTED_TYPES[key]
         defaults = hs_type.default_parameters()
@@ -271,6 +310,7 @@ class FaceModeTaskPanel:
         height_default = 20.0
         height_min = 1.0
 
+        # создаём spinbox'ы для всех параметров, кроме высоты
         for param in hs_type.parameters:
             if param.name == self._height_param_name:
                 height_default = defaults.get(param.name, max(param.min_value, 1.0))
@@ -352,6 +392,7 @@ class FaceModeTaskPanel:
         delta_t = float(self.delta_t_spin.value())
         mode = self.analysis_mode_combo.currentData()
         heatsink_type = self._current_type_key
+        mat = self._current_material()
 
         # общие параметры (без высоты)
         params_common: Dict[str, float] = {
@@ -366,21 +407,33 @@ class FaceModeTaskPanel:
             if base_thickness_mm <= 0:
                 base_thickness_mm = 5.0
 
+        base_thickness_m = base_thickness_mm / 1000.0
+
         # ----- режим: P_load по высоте -----
         if mode == "h_to_q":
             params = dict(params_common)
+            if heatsink_type == "solid_plate":
+                base_thickness_mm = float(self.height_spin.value())
+                base_thickness_m = base_thickness_mm / 1000.0
+
             if self._height_param_name:
                 params[self._height_param_name] = float(self.height_spin.value())
 
             try:
                 details = self.controller.prepare_geometry(
-                    heatsink_type, params, base_thickness_mm
+                    heatsink_type,
+                    params,
+                    base_thickness_mm,
+                    material_k=mat.thermal_conductivity_w_mk,
                 )
                 res = estimate_heat_dissipation(
                     details.geometry,
                     env,
                     power_input_w=None,
                     target_overtemp_c=delta_t,
+                    base_thickness_m=base_thickness_m,
+                    material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                    base_contact_area_m2=details.geometry.base_area_m2,
                 )
             except Exception as exc:
                 self.result_label.setText(f"Ошибка теплового расчёта: {exc}")
@@ -388,6 +441,7 @@ class FaceModeTaskPanel:
 
             self.result_label.setText(
                 f"Режим: P_load по высоте\n"
+                f"Материал: {mat.label}\n"
                 f"Макс. допустимая мощность P_load_max ≈ {res.heat_dissipation_w:.1f} Вт\n"
                 f"при ΔT = {delta_t:.1f} °C."
             )
@@ -402,32 +456,43 @@ class FaceModeTaskPanel:
             )
             return
 
-        if heatsink_type == "solid_plate":
-            self.result_label.setText(
-                "Режим 'высота по P_load' для сплошной пластины ведёт к подбору толщины.\n"
-                "Пока для наглядности используйте тип с рёбрами/пинами."
-            )
-            return
-
         height_param = HEIGHT_PARAM_MAP.get(heatsink_type)
         if not height_param:
             self.result_label.setText("Для данного типа не найден параметр высоты.")
             return
 
         # функция: по высоте → Q_max
-        def q_for_height(h_mm: float):
-            p = dict(params_common)
-            p[height_param] = h_mm
+        def q_for_height(h_mm: float) -> float:
+            params = dict(params_common)
+            # для пластины толщина основания = высота
+            if heatsink_type == "solid_plate":
+                base_t_local_mm = h_mm
+                base_t_local_m = base_t_local_mm / 1000.0
+                params[height_param] = h_mm  # base_thickness_mm
+            else:
+                base_t_local_mm = base_thickness_mm
+                base_t_local_m = base_t_local_mm / 1000.0
+                params[height_param] = h_mm
+
             details = self.controller.prepare_geometry(
-                heatsink_type, p, base_thickness_mm
+                heatsink_type,
+                params,
+                base_t_local_mm,
+                material_k=mat.thermal_conductivity_w_mk,
             )
             res = estimate_heat_dissipation(
-                details.geometry, env, power_input_w=None, target_overtemp_c=delta_t
+                details.geometry,
+                env,
+                power_input_w=None,
+                target_overtemp_c=delta_t,
+                base_thickness_m=base_t_local_m,
+                material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                base_contact_area_m2=details.geometry.base_area_m2,
             )
             return res.heat_dissipation_w
 
-        # адаптивный поиск высоты
-        H_CAP = 1000.0  # 1 м – достаточно "бесконечно"
+        # адаптивный поиск высоты (до 1 м)
+        H_CAP = 1000.0
         h = max(float(self.height_spin.value()), 1.0)
 
         q = q_for_height(h)
@@ -435,7 +500,6 @@ class FaceModeTaskPanel:
             best_h = h
         else:
             h_low = h
-            q_low = q
             h_high = h * 2.0
             best_h = None
             while h_high <= H_CAP:
@@ -471,6 +535,7 @@ class FaceModeTaskPanel:
 
         self.result_label.setText(
             "Режим: высота по P_load\n"
+            f"Материал: {mat.label}\n"
             f"Необходимая высота ≈ {h_round:.0f} мм\n"
             f"для P_load = {p_req:.1f} Вт и ΔT = {delta_t:.1f} °C.\n"
             f"Q_max при этой высоте ≈ {q_round:.1f} Вт."
@@ -496,6 +561,7 @@ class FaceModeTaskPanel:
         }
 
         heatsink_type = self._current_type_key
+        # толщина основания
         if heatsink_type == "solid_plate":
             base_thickness_mm = float(self.height_spin.value())
         else:
@@ -548,14 +614,6 @@ class FaceModeTaskPanel:
         QtWidgets = self._QtWidgets
 
         heatsink_type = self._current_type_key
-        if heatsink_type == "solid_plate":
-            QtWidgets.QMessageBox.information(
-                self.form,
-                "График Q_max(h)",
-                "Для сплошной пластины высоты ребра нет — график не строится.",
-            )
-            return
-
         height_param = HEIGHT_PARAM_MAP.get(heatsink_type)
         if not height_param:
             QtWidgets.QMessageBox.warning(
@@ -573,13 +631,18 @@ class FaceModeTaskPanel:
         params_common: Dict[str, float] = {
             name: widget.value() for name, widget in self._param_widgets.items()
         }
-        base_thickness_mm = float(params_common.get("base_thickness_mm", 5.0))
-        if base_thickness_mm <= 0:
-            base_thickness_mm = 5.0
+        heatsink_type = self._current_type_key
+        mat = self._current_material()
+        env = Environment()
+        delta_t = float(self.delta_t_spin.value())
 
-        self.controller.validate_selection()
-        sel = self.controller.selection
-        base_dims = sel.base_dimensions(base_thickness_mm)
+        # толщина основания
+        if heatsink_type == "solid_plate":
+            base_thickness_mm0 = float(self.height_spin.value())
+        else:
+            base_thickness_mm0 = float(params_common.get("base_thickness_mm", 5.0))
+            if base_thickness_mm0 <= 0:
+                base_thickness_mm0 = 5.0
 
         try:
             import matplotlib.pyplot as plt  # type: ignore[import]
@@ -590,9 +653,6 @@ class FaceModeTaskPanel:
                 "Библиотека matplotlib не установлена",
             )
             return
-
-        env = Environment()
-        delta_t = float(self.delta_t_spin.value())
 
         h_center = float(self.height_spin.value())
         h_min = 1.0
@@ -605,19 +665,36 @@ class FaceModeTaskPanel:
 
         for h in heights:
             params = dict(params_common)
-            params[height_param] = h
+            if heatsink_type == "solid_plate":
+                base_t_local_mm = h
+                base_t_local_m = base_t_local_mm / 1000.0
+                params[height_param] = h
+            else:
+                base_t_local_mm = base_thickness_mm0
+                base_t_local_m = base_t_local_mm / 1000.0
+                params[height_param] = h
+
             details = self.controller.prepare_geometry(
-                heatsink_type, params, base_thickness_mm
+                heatsink_type,
+                params,
+                base_t_local_mm,
+                material_k=mat.thermal_conductivity_w_mk,
             )
             res = estimate_heat_dissipation(
-                details.geometry, env, power_input_w=None, target_overtemp_c=delta_t
+                details.geometry,
+                env,
+                power_input_w=None,
+                target_overtemp_c=delta_t,
+                base_thickness_m=base_t_local_m,
+                material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                base_contact_area_m2=details.geometry.base_area_m2,
             )
             q_values.append(res.heat_dissipation_w)
 
         plt.plot(heights, q_values, marker="o")
         plt.xlabel("Высота, мм")
         plt.ylabel(f"Q_max при ΔT = {delta_t:.1f} °C, Вт")
-        plt.title("Зависимость Q_max от высоты (текущий тип)")
+        plt.title(f"Q_max(h) для типа: {SUPPORTED_TYPES[heatsink_type].label}")
         plt.grid(True)
         plt.show()
 

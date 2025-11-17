@@ -1,13 +1,13 @@
-"""Geometry helpers for heatsink area estimation and FreeCAD solid creation."""
+"""Geometry helpers used to approximate heatsink shapes and build FreeCAD solids."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 
-# Вместо относительных импортов — абсолютные + fallback
+# Try absolute imports first (as a package), then fallback to local modules
 try:
     from HeatsinkDesigner.cnc_defaults import DEFAULT_CNC_PARAMS
-except ImportError:
+except ImportError:  # pragma: no cover
     from cnc_defaults import DEFAULT_CNC_PARAMS  # type: ignore[no-redef]
 
 try:
@@ -17,7 +17,7 @@ try:
         effective_area_with_fins,
         estimate_fin_efficiency,
     )
-except ImportError:
+except ImportError:  # pragma: no cover
     from thermal_model import (  # type: ignore[no-redef]
         GeometrySummary,
         convert_mm_to_m,
@@ -25,10 +25,10 @@ except ImportError:
         estimate_fin_efficiency,
     )
 
+
 # ---------------------------------------------------------------------------
 # Аналитическая геометрия (для тепловых расчётов)
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class BaseDimensions:
@@ -45,8 +45,8 @@ class GeometryDetails:
 
     geometry: GeometrySummary
     notes: List[str] = field(default_factory=list)
-    fin_count: int | None = None
-    fin_area_m2: float | None = None
+    fin_count: Optional[int] = None
+    fin_area_m2: Optional[float] = None
 
 
 def _validate_positive(value: float, name: str) -> None:
@@ -62,9 +62,11 @@ def _characteristic_length(base: BaseDimensions) -> float:
     return max(convert_mm_to_m(base.length_mm), convert_mm_to_m(base.width_mm))
 
 
-def build_solid_plate(base: BaseDimensions) -> GeometryDetails:
+def build_solid_plate(
+    base: BaseDimensions,
+    material_conductivity_w_mk: float,
+) -> GeometryDetails:
     """Return geometry summary for a solid plate heatsink."""
-
     _validate_positive(base.base_thickness_mm, "base_thickness_mm")
     area = _base_area(base)
     geometry = GeometrySummary(
@@ -72,7 +74,11 @@ def build_solid_plate(base: BaseDimensions) -> GeometryDetails:
         effective_area_m2=area,
         characteristic_length_m=_characteristic_length(base),
     )
-    return GeometryDetails(geometry=geometry, notes=["Solid plate geometry"])
+    notes = [
+        f"Solid plate geometry; base thickness {base.base_thickness_mm:.1f} mm, "
+        f"k ≈ {material_conductivity_w_mk:.1f} W/m·K",
+    ]
+    return GeometryDetails(geometry=geometry, notes=notes)
 
 
 def build_straight_fins(
@@ -80,9 +86,9 @@ def build_straight_fins(
     fin_height_mm: float,
     fin_thickness_mm: float,
     fin_gap_mm: float,
+    material_conductivity_w_mk: float,
 ) -> GeometryDetails:
     """Approximate straight fin layout and effective area."""
-
     for value, name in [
         (fin_height_mm, "fin_height_mm"),
         (fin_thickness_mm, "fin_thickness_mm"),
@@ -100,7 +106,11 @@ def build_straight_fins(
         base.length_mm
     )
     base_area = _base_area(base)
-    fin_eff = estimate_fin_efficiency(fin_thickness_mm, fin_height_mm)
+    fin_eff = estimate_fin_efficiency(
+        fin_thickness_mm,
+        fin_height_mm,
+        material_conductivity_w_mk=material_conductivity_w_mk,
+    )
     effective_area = effective_area_with_fins(base_area, fin_area_m2, fin_eff)
 
     geometry = GeometrySummary(
@@ -109,7 +119,8 @@ def build_straight_fins(
         characteristic_length_m=_characteristic_length(base),
     )
     notes = [
-        f"Straight fins: {fin_count} pcs, efficiency {fin_eff:.2f}",
+        f"Straight fins: {fin_count} pcs, efficiency {fin_eff:.2f}, "
+        f"material k ≈ {material_conductivity_w_mk:.1f} W/m·K",
     ]
     return GeometryDetails(
         geometry=geometry,
@@ -124,9 +135,9 @@ def build_crosscut(
     pin_height_mm: float,
     pin_size_mm: float,
     groove_width_mm: float,
+    material_conductivity_w_mk: float,
 ) -> GeometryDetails:
     """Approximate grid (crosscut) geometry."""
-
     for value, name in [
         (pin_height_mm, "pin_height_mm"),
         (pin_size_mm, "pin_size_mm"),
@@ -144,7 +155,11 @@ def build_crosscut(
     pin_side_m = convert_mm_to_m(pin_size_mm)
     pin_area_m2 = pin_count * 4 * pin_side_m * convert_mm_to_m(pin_height_mm)
     base_area = _base_area(base)
-    fin_eff = estimate_fin_efficiency(pin_size_mm, pin_height_mm)
+    fin_eff = estimate_fin_efficiency(
+        pin_size_mm,
+        pin_height_mm,
+        material_conductivity_w_mk=material_conductivity_w_mk,
+    )
     effective_area = effective_area_with_fins(base_area, pin_area_m2, fin_eff)
 
     geometry = GeometrySummary(
@@ -153,7 +168,8 @@ def build_crosscut(
         characteristic_length_m=_characteristic_length(base),
     )
     notes = [
-        f"Crosscut pins: {pin_count} pcs at pitch {pitch_mm:.1f} mm",
+        f"Crosscut pins: {pin_count} pcs at pitch {pitch_mm:.1f} mm, "
+        f"material k ≈ {material_conductivity_w_mk:.1f} W/m·K",
     ]
     return GeometryDetails(
         geometry=geometry,
@@ -168,9 +184,9 @@ def build_pin_fin(
     pin_height_mm: float,
     pin_size_mm: float,
     pitch_mm: float,
+    material_conductivity_w_mk: float,
 ) -> GeometryDetails:
     """Approximate pin-fin array."""
-
     for value, name in [
         (pin_height_mm, "pin_height_mm"),
         (pin_size_mm, "pin_size_mm"),
@@ -185,7 +201,11 @@ def build_pin_fin(
         pin_height_mm
     )
     base_area = _base_area(base)
-    fin_eff = estimate_fin_efficiency(pin_size_mm, pin_height_mm)
+    fin_eff = estimate_fin_efficiency(
+        pin_size_mm,
+        pin_height_mm,
+        material_conductivity_w_mk=material_conductivity_w_mk,
+    )
     effective_area = effective_area_with_fins(base_area, pin_area_m2, fin_eff)
 
     geometry = GeometrySummary(
@@ -193,7 +213,10 @@ def build_pin_fin(
         effective_area_m2=effective_area,
         characteristic_length_m=_characteristic_length(base),
     )
-    notes = [f"Pin-fin count: {pin_count} at pitch {pitch_mm:.1f} mm"]
+    notes = [
+        f"Pin-fin count: {pin_count} at pitch {pitch_mm:.1f} mm, "
+        f"material k ≈ {material_conductivity_w_mk:.1f} W/m·K",
+    ]
     return GeometryDetails(
         geometry=geometry,
         notes=notes,
@@ -205,11 +228,13 @@ def build_pin_fin(
 def build_geometry(
     heatsink_type: str,
     base_dimensions: Tuple[float, float, float],
-    params: Dict[str, float] | None = None,
+    params: Optional[Dict[str, float]] = None,
 ) -> GeometryDetails:
-    """Dispatch geometry creation based on heatsink type key."""
+    """Dispatch geometry creation based on heatsink type key.
 
-    params = params or {}
+    params может содержать ключ "material_conductivity_w_mk".
+    """
+    params = dict(params) if params is not None else {}
     base = BaseDimensions(
         length_mm=base_dimensions[0],
         width_mm=base_dimensions[1],
@@ -218,14 +243,17 @@ def build_geometry(
     defaults = DEFAULT_CNC_PARAMS.get(heatsink_type, {})
     merged = {**defaults, **params}
 
+    material_k = float(merged.pop("material_conductivity_w_mk", 205.0))
+
     if heatsink_type == "solid_plate":
-        return build_solid_plate(base)
+        return build_solid_plate(base, material_k)
     if heatsink_type == "straight_fins":
         return build_straight_fins(
             base,
             fin_height_mm=merged["fin_height_mm"],
             fin_thickness_mm=merged["fin_thickness_mm"],
             fin_gap_mm=merged["fin_gap_mm"],
+            material_conductivity_w_mk=material_k,
         )
     if heatsink_type == "crosscut":
         return build_crosscut(
@@ -233,6 +261,7 @@ def build_geometry(
             pin_height_mm=merged["pin_height_mm"],
             pin_size_mm=merged["pin_size_mm"],
             groove_width_mm=merged["groove_width_mm"],
+            material_conductivity_w_mk=material_k,
         )
     if heatsink_type == "pin_fin":
         return build_pin_fin(
@@ -240,15 +269,14 @@ def build_geometry(
             pin_height_mm=merged["pin_height_mm"],
             pin_size_mm=merged["pin_size_mm"],
             pitch_mm=merged["pitch_mm"],
+            material_conductivity_w_mk=material_k,
         )
     raise ValueError(f"Unknown heatsink type: {heatsink_type}")
 
 
 # ---------------------------------------------------------------------------
-# 3D-геометрия в FreeCAD: построение по прямоугольнику или произвольному
-# контуру (face/sketch)
+# 3D-геометрия в FreeCAD (произвольный контур)
 # ---------------------------------------------------------------------------
-
 
 def _profile_to_face(profile_shape, base: BaseDimensions):
     """Преобразовать выбранный профиль (face/sketch) в Part.Face.
@@ -257,46 +285,43 @@ def _profile_to_face(profile_shape, base: BaseDimensions):
     """
     try:
         import Part  # type: ignore
-    except Exception as exc:  # pragma: no cover - используется только в FreeCAD
+    except Exception as exc:  # pragma: no cover
         raise RuntimeError("Модуль Part недоступен") from exc
 
     if profile_shape is None:
         return Part.makePlane(base.length_mm, base.width_mm)
 
     shape = profile_shape
-    # Если это объект документа (Sketch и т.п.)
     if hasattr(shape, "Shape"):
         shape = shape.Shape  # type: ignore[assignment]
 
-    # Если есть список граней — берём первую
     try:
         if hasattr(shape, "Faces") and shape.Faces:  # type: ignore[attr-defined]
             return shape.Faces[0]  # type: ignore[index]
     except Exception:
         pass
 
-    # Если есть внешняя проволока (OuterWire)
     try:
         if hasattr(shape, "OuterWire"):  # type: ignore[attr-defined]
             return Part.Face(shape.OuterWire)  # type: ignore[arg-type]
     except Exception:
         pass
 
-    # Последний шанс — пытаемся сделать Face прямо из shape
     try:
         return Part.Face(shape)  # type: ignore[arg-type]
     except Exception:
-        # Совсем fallback: простая плоскость
         return Part.makePlane(base.length_mm, base.width_mm)
 
 
 def _create_fins_solid(
-    Part, App, heatsink_type: str, base: BaseDimensions, params: Dict[str, float], bb
-) -> Tuple[Optional[object], float]:
-    """Создать объединённый solid всех рёбер/пинов и вернуть (solid, высота_ребра_мм).
-
-    Если рёбра не нужны (solid plate) — вернуть (None, 0.0).
-    """
+    Part,
+    App,
+    heatsink_type: str,
+    base: BaseDimensions,
+    params: Dict[str, float],
+    bb,
+):
+    """Создать объединённый solid всех рёбер/пинов и вернуть (solid, высота_ребра_мм)."""
     x0 = bb.XMin
     y0 = bb.YMin
     L = bb.XLength
@@ -380,17 +405,11 @@ def create_heatsink_solid(
     doc=None,
     profile_shape=None,
 ):
-    """Создать 3D-модель радиатора в FreeCAD.
-
-    - Если profile_shape задан (face/sketch), основание и рёбра обрезаются
-      по произвольному контуру.
-    - Если profile_shape = None, используется прямоугольник длиной/шириной
-      BaseDimensions.
-    """
+    """Создать 3D-модель радиатора в FreeCAD."""
     try:
         import FreeCAD as App  # type: ignore
         import Part  # type: ignore
-    except Exception as exc:  # pragma: no cover - выполняется только в FreeCAD
+    except Exception as exc:  # pragma: no cover
         raise RuntimeError(
             "Создание 3D-геометрии возможно только внутри FreeCAD"
         ) from exc
@@ -401,10 +420,8 @@ def create_heatsink_solid(
     base_face = _profile_to_face(profile_shape, base)
     normal = App.Vector(0, 0, 1)
 
-    # Основание
     base_solid = base_face.extrude(normal * base.base_thickness_mm)
 
-    # Просто пластина
     if heatsink_type == "solid_plate":
         obj = doc.addObject("Part::Feature", "Heatsink_SolidPlate")
         obj.Label = "Heatsink solid plate"
@@ -412,9 +429,13 @@ def create_heatsink_solid(
         doc.recompute()
         return obj
 
-    # Рёбра/пины
     fins_solid, fin_height_mm = _create_fins_solid(
-        Part, App, heatsink_type, base, params, base_face.BoundBox
+        Part,
+        App,
+        heatsink_type,
+        base,
+        params,
+        base_face.BoundBox,
     )
     if fins_solid is None or fin_height_mm <= 0:
         obj = doc.addObject("Part::Feature", "Heatsink_BaseOnly")
@@ -423,7 +444,6 @@ def create_heatsink_solid(
         doc.recompute()
         return obj
 
-    # Призма по контуру для обрезки рёбер по произвольному контуру
     total_height = base.base_thickness_mm + fin_height_mm
     contour_prism = base_face.extrude(normal * total_height)
 

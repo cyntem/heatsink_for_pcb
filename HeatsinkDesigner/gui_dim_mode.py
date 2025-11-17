@@ -12,7 +12,7 @@ try:
         build_geometry,
         create_heatsink_solid,
     )
-except ImportError:
+except ImportError:  # pragma: no cover
     from geometry_builder import (  # type: ignore[no-redef]
         BaseDimensions,
         GeometryDetails,
@@ -22,24 +22,29 @@ except ImportError:
 
 try:
     from HeatsinkDesigner.heatsink_types import SUPPORTED_TYPES
-except ImportError:
+except ImportError:  # pragma: no cover
     from heatsink_types import SUPPORTED_TYPES  # type: ignore[no-redef]
 
 try:
     from HeatsinkDesigner.cnc_defaults import DEFAULT_CNC_PARAMS
-except ImportError:
+except ImportError:  # pragma: no cover
     from cnc_defaults import DEFAULT_CNC_PARAMS  # type: ignore[no-redef]
 
 try:
     from HeatsinkDesigner.thermal_model import (
         Environment,
         estimate_heat_dissipation,
+        MATERIALS,
+        DEFAULT_MATERIAL_KEY,
     )
-except ImportError:
+except ImportError:  # pragma: no cover
     from thermal_model import (  # type: ignore[no-redef]
         Environment,
         estimate_heat_dissipation,
+        MATERIALS,
+        DEFAULT_MATERIAL_KEY,
     )
+
 
 HEIGHT_PARAM_MAP: Dict[str, str] = {
     "solid_plate": "base_thickness_mm",
@@ -137,6 +142,17 @@ class DimensionModeTaskPanel:
         self.delta_t_spin.setSuffix(" °C")
         self.therm_layout.addRow("Допустимый перегрев ΔT:", self.delta_t_spin)
 
+        # Материал радиатора
+        self.material_combo = QtWidgets.QComboBox()
+        self._material_keys = list(MATERIALS.keys())
+        for key in self._material_keys:
+            mat = MATERIALS[key]
+            self.material_combo.addItem(mat.label, userData=key)
+        if DEFAULT_MATERIAL_KEY in self._material_keys:
+            idx = self._material_keys.index(DEFAULT_MATERIAL_KEY)
+            self.material_combo.setCurrentIndex(idx)
+        self.therm_layout.addRow("Материал радиатора:", self.material_combo)
+
         self.analysis_mode_combo = QtWidgets.QComboBox()
         self.analysis_mode_combo.addItem("Рассчитать P_load по высоте", userData="h_to_q")
         self.analysis_mode_combo.addItem("Рассчитать высоту по P_load", userData="q_to_h")
@@ -154,7 +170,7 @@ class DimensionModeTaskPanel:
         self.height_spin = QtWidgets.QDoubleSpinBox()
         self.height_spin.setRange(1.0, 1e6)
         self.height_spin.setDecimals(2)
-        self.height_spin.setSingleStep(0.1)   
+        self.height_spin.setSingleStep(0.1)  # шаг 0.1 мм
         self.height_spin.setValue(20.0)
         self.height_spin.setSuffix(" мм")
         self.therm_layout.addRow(self.height_label, self.height_spin)
@@ -208,12 +224,22 @@ class DimensionModeTaskPanel:
             spin.valueChanged.connect(self._update_result_label)
 
         self.type_combo.currentIndexChanged.connect(self._update_result_label)
+        self.material_combo.currentIndexChanged.connect(self._update_result_label)
         self.analysis_mode_combo.currentIndexChanged.connect(self._on_analysis_mode_changed)
 
         self._on_analysis_mode_changed(self.analysis_mode_combo.currentIndex())
         self._update_result_label()
 
     # ----------------------------------------------------------- helpers -----
+    def _current_material(self):
+        key = self.material_combo.currentData()
+        if not key:
+            key = DEFAULT_MATERIAL_KEY
+        mat = MATERIALS.get(key)
+        if mat is None:
+            mat = MATERIALS[DEFAULT_MATERIAL_KEY]
+        return mat
+
     def _on_analysis_mode_changed(self, index: int) -> None:
         mode = self.analysis_mode_combo.currentData()
         if mode == "h_to_q":
@@ -257,6 +283,7 @@ class DimensionModeTaskPanel:
         dim: DimensionInput,
         delta_t: float,
         p_req: float,
+        material_k: float,
     ) -> Optional[float]:
         """Найти высоту для данного типа по требуемой мощности (без H_max)."""
         env = Environment()
@@ -265,14 +292,28 @@ class DimensionModeTaskPanel:
             return None
 
         params_base = self._default_params_for_type(type_key, dim, use_height_spin=False)
-        H_CAP = 1000.0  # 1 м считаем "бесконечностью"
+        params_base["material_conductivity_w_mk"] = material_k
+
+        H_CAP = 1000.0  # 1 м
 
         def q_for_height(h_mm: float) -> float:
             p = dict(params_base)
+            if type_key == "solid_plate":
+                base_t_local_mm = h_mm
+            else:
+                base_t_local_mm = dim.base_thickness_mm
+            base_t_local_m = base_t_local_mm / 1000.0
+
             p[hp] = h_mm
             details = build_geometry(type_key, dim.to_tuple(), p)
             res = estimate_heat_dissipation(
-                details.geometry, env, power_input_w=None, target_overtemp_c=delta_t
+                details.geometry,
+                env,
+                power_input_w=None,
+                target_overtemp_c=delta_t,
+                base_thickness_m=base_t_local_m,
+                material_conductivity_w_mk=material_k,
+                base_contact_area_m2=details.geometry.base_area_m2,
             )
             return res.heat_dissipation_w
 
@@ -283,7 +324,6 @@ class DimensionModeTaskPanel:
 
         # Адаптивное расширение
         h_low = h
-        q_low = q
         h_high = h * 2.0
 
         while h_high <= H_CAP:
@@ -317,6 +357,9 @@ class DimensionModeTaskPanel:
         current_data = self.type_combo.currentData()
         auto_mode = current_data == "__auto__"
         p_req = float(self.power_spin.value())
+        mat = self._current_material()
+
+        base_thickness_m = dim.base_thickness_mm / 1000.0
 
         # ----- режим: P_load по высоте -----
         if mode == "h_to_q":
@@ -328,8 +371,18 @@ class DimensionModeTaskPanel:
             type_list = self._type_keys if auto_mode else [str(current_data)]
             for type_key in type_list:
                 params = self._default_params_for_type(
-                    type_key, dim, use_height_spin=True
+                    type_key,
+                    dim,
+                    use_height_spin=True,
                 )
+                params["material_conductivity_w_mk"] = mat.thermal_conductivity_w_mk
+                # Толщина основания: для пластины — высота, для остальных — dim.base_thickness_mm
+                if type_key == "solid_plate":
+                    base_t_mm = float(self.height_spin.value())
+                else:
+                    base_t_mm = dim.base_thickness_mm
+                base_t_m = base_t_mm / 1000.0
+
                 try:
                     details = build_geometry(type_key, dim.to_tuple(), params)
                     res = estimate_heat_dissipation(
@@ -337,6 +390,9 @@ class DimensionModeTaskPanel:
                         env,
                         power_input_w=None,
                         target_overtemp_c=delta_t,
+                        base_thickness_m=base_t_m,
+                        material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                        base_contact_area_m2=details.geometry.base_area_m2,
                     )
                 except Exception:
                     continue
@@ -353,6 +409,7 @@ class DimensionModeTaskPanel:
             text = (
                 "Режим: P_load по высоте\n"
                 f"Тип радиатора: {label}\n"
+                f"Материал: {mat.label}\n"
                 f"Макс. допустимая мощность P_load_max ≈ {best_q:.1f} Вт\n"
                 f"при ΔT = {delta_t:.1f} °C."
             )
@@ -368,10 +425,13 @@ class DimensionModeTaskPanel:
         best_h: Optional[float] = None
 
         for type_key in type_list:
-            if type_key == "solid_plate":
-                # для пластины подбор по высоте не очень осмыслен
-                continue
-            h_local = self._find_height_for_type(type_key, dim, delta_t, p_req)
+            h_local = self._find_height_for_type(
+                type_key,
+                dim,
+                delta_t,
+                p_req,
+                material_k=mat.thermal_conductivity_w_mk,
+            )
             if h_local is None:
                 continue
             if best_h is None or h_local < best_h:
@@ -387,20 +447,33 @@ class DimensionModeTaskPanel:
                 "Уменьшите P_load или увеличьте площадь основания.",
             )
 
-        # Округляем высоту и пересчитываем Q_max
         hp_final = HEIGHT_PARAM_MAP.get(best_type_key)
         params = self._default_params_for_type(
-            best_type_key, dim, use_height_spin=False
+            best_type_key,
+            dim,
+            use_height_spin=False,
         )
+        params["material_conductivity_w_mk"] = mat.thermal_conductivity_w_mk
         if hp_final:
             h_round = max(1.0, round(best_h))
             params[hp_final] = h_round
+
+            # Толщина основания
+            if best_type_key == "solid_plate":
+                base_t_mm_final = h_round
+            else:
+                base_t_mm_final = dim.base_thickness_mm
+            base_t_m_final = base_t_mm_final / 1000.0
+
             details = build_geometry(best_type_key, dim.to_tuple(), params)
             res = estimate_heat_dissipation(
                 details.geometry,
                 env,
                 power_input_w=None,
                 target_overtemp_c=delta_t,
+                base_thickness_m=base_t_m_final,
+                material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                base_contact_area_m2=details.geometry.base_area_m2,
             )
 
             # обновим высоту в UI
@@ -412,6 +485,7 @@ class DimensionModeTaskPanel:
             text = (
                 "Режим: высота по P_load\n"
                 f"Тип радиатора: {label}\n"
+                f"Материал: {mat.label}\n"
                 f"Необходимая высота ≈ {h_round:.0f} мм\n"
                 f"для P_load = {p_req:.1f} Вт и ΔT = {delta_t:.1f} °C.\n"
                 f"Q_max при этой высоте ≈ {res.heat_dissipation_w:.1f} Вт."
@@ -492,6 +566,7 @@ class DimensionModeTaskPanel:
 
         env = Environment()
         delta_t = float(self.delta_t_spin.value())
+        mat = self._current_material()
 
         H_PLOT_MAX = 100.0  # мм – диапазон для графика
         h_min = 1.0
@@ -502,8 +577,6 @@ class DimensionModeTaskPanel:
         ]
 
         for type_key in self._type_keys:
-            if type_key == "solid_plate":
-                continue  # нет реальной "высоты рёбер"
             hp = HEIGHT_PARAM_MAP.get(type_key)
             if not hp:
                 continue
@@ -511,17 +584,28 @@ class DimensionModeTaskPanel:
             params_base = self._default_params_for_type(
                 type_key, dim, use_height_spin=False
             )
+            params_base["material_conductivity_w_mk"] = mat.thermal_conductivity_w_mk
             q_values: List[float] = []
 
             for h in heights:
                 params = dict(params_base)
                 params[hp] = h
+                # Толщина основания
+                if type_key == "solid_plate":
+                    base_t_mm = h
+                else:
+                    base_t_mm = dim.base_thickness_mm
+                base_t_m = base_t_mm / 1000.0
+
                 details = build_geometry(type_key, dim.to_tuple(), params)
                 res = estimate_heat_dissipation(
                     details.geometry,
                     env,
                     power_input_w=None,
                     target_overtemp_c=delta_t,
+                    base_thickness_m=base_t_m,
+                    material_conductivity_w_mk=mat.thermal_conductivity_w_mk,
+                    base_contact_area_m2=details.geometry.base_area_m2,
                 )
                 q_values.append(res.heat_dissipation_w)
 

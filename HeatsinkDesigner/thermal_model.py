@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 
@@ -28,6 +28,10 @@ AIR_PRANDTL = 0.71
 AIR_DENSITY = 1.184  # kg/m^3 at 25 C
 AIR_VISCOSITY = 1.85e-5  # Pa*s
 
+
+# ---------------------------------------------------------------------------
+# Служебные структуры
+# ---------------------------------------------------------------------------
 
 @dataclass
 class DependencyStatus:
@@ -75,34 +79,90 @@ class ThermalResult:
     surface_temperature_c: float
 
 
+@dataclass(frozen=True)
+class Material:
+    """Simple description of a heatsink material."""
 
+    key: str
+    label: str
+    thermal_conductivity_w_mk: float
+
+
+# ---------------------------------------------------------------------------
+# Библиотека материалов радиаторов
+# ---------------------------------------------------------------------------
+
+MATERIALS: Dict[str, Material] = {
+    # Типичные алюминиевые сплавы для радиаторов
+    "al_6061": Material(
+        key="al_6061",
+        label="Aluminium 6061-T6 (~167 W/m·K)",
+        thermal_conductivity_w_mk=167.0,
+    ),
+    "al_1050": Material(
+        key="al_1050",
+        label="Aluminium 1050A (~222 W/m·K)",
+        thermal_conductivity_w_mk=222.0,
+    ),
+    "al_3003": Material(
+        key="al_3003",
+        label="Aluminium 3003 (~160 W/m·K)",
+        thermal_conductivity_w_mk=160.0,
+    ),
+    # Медь и латунь
+    "cu_ofhc": Material(
+        key="cu_ofhc",
+        label="Copper OFHC (~390 W/m·K)",
+        thermal_conductivity_w_mk=390.0,
+    ),
+    "brass": Material(
+        key="brass",
+        label="Brass (~110 W/m·K)",
+        thermal_conductivity_w_mk=110.0,
+    ),
+    # Нержавейка
+    "ss_304": Material(
+        key="ss_304",
+        label="Stainless steel 304 (~16 W/m·K)",
+        thermal_conductivity_w_mk=16.0,
+    ),
+}
+
+# По умолчанию самый типичный радиаторный алюминий
+DEFAULT_MATERIAL_KEY = "al_6061"
+
+
+def get_material(key: Optional[str]) -> Material:
+    """Return a Material object for given key or default one."""
+    if key and key in MATERIALS:
+        return MATERIALS[key]
+    return MATERIALS[DEFAULT_MATERIAL_KEY]
+
+
+# ---------------------------------------------------------------------------
+# Базовые функции
+# ---------------------------------------------------------------------------
 
 def dependency_status() -> DependencyStatus:
     """Return availability flags for optional dependencies."""
-
     return DependencyStatus(ht_available=HT_AVAILABLE, fluids_available=FLUIDS_AVAILABLE)
 
 
 def convert_mm_to_m(value_mm: float) -> float:
     """Convert millimeters to meters."""
-
     return value_mm / 1000.0
 
 
 def _saturation_pressure_pa(temp_c: float) -> float:
     """Approximate saturation vapor pressure for water using Tetens formula."""
-
-    temp_k = temp_c + 273.15
     return 610.94 * np.exp((17.625 * temp_c) / (temp_c + 243.04))
 
 
 def compute_air_properties(temp_c: float, relative_humidity: float) -> Dict[str, float]:
     """Return simplified air properties.
 
-    Uses fluids when available; otherwise falls back to engineering constants
-    sufficient for heat transfer estimation.
+    Uses fluids when available; otherwise falls back to engineering constants.
     """
-
     if FLUIDS_AVAILABLE and fluids is not None:
         saturation_pressure = _saturation_pressure_pa(temp_c)
         partial_vapor_pressure = relative_humidity / 100.0 * saturation_pressure
@@ -121,14 +181,13 @@ def compute_air_properties(temp_c: float, relative_humidity: float) -> Dict[str,
 
 def convection_coefficient_natural(geometry: GeometrySummary, delta_t: float) -> float:
     """Estimate natural convection coefficient using laminar plate correlation."""
-
     properties = compute_air_properties(DEFAULT_T_AMB_C, DEFAULT_REL_HUMIDITY)
     beta = 1.0 / (DEFAULT_T_AMB_C + 273.15)
     g = 9.81
     grashof = (
         g
         * beta
-        * (delta_t)
+        * delta_t
         * geometry.characteristic_length_m ** 3
         * properties["density"] ** 2
         / (properties["viscosity"] ** 2)
@@ -143,7 +202,6 @@ def convection_coefficient_natural(geometry: GeometrySummary, delta_t: float) ->
 
 def convection_coefficient_forced(velocity_m_per_s: float) -> float:
     """Estimate forced convection coefficient for moderate airflow."""
-
     return 10.45 - velocity_m_per_s + 10.0 * velocity_m_per_s ** 0.5
 
 
@@ -153,18 +211,16 @@ def effective_area_with_fins(
     fin_efficiency: float,
 ) -> float:
     """Combine base and fin areas into effective area."""
-
     return base_area_m2 + fin_efficiency * fin_area_m2
 
 
 def estimate_fin_efficiency(
     fin_thickness_mm: float,
     fin_height_mm: float,
-    material_conductivity_w_mk: float = 205.0,
+    material_conductivity_w_mk: float = MATERIALS[DEFAULT_MATERIAL_KEY].thermal_conductivity_w_mk,
     convection_coeff_w_m2k: float = 8.0,
 ) -> float:
     """Estimate fin efficiency for straight plate fins."""
-
     thickness_m = convert_mm_to_m(fin_thickness_mm)
     height_m = convert_mm_to_m(fin_height_mm)
     if thickness_m <= 0 or height_m <= 0:
@@ -174,27 +230,75 @@ def estimate_fin_efficiency(
     return float(np.clip(eta, 0.0, 1.0))
 
 
+# ---------------------------------------------------------------------------
+# Основная тепловая модель: конвекция + теплопроводность основания
+# ---------------------------------------------------------------------------
+
 def estimate_heat_dissipation(
     geometry: GeometrySummary,
     environment: Environment,
-    power_input_w: float | None = None,
+    power_input_w: Optional[float] = None,
     target_overtemp_c: float = DEFAULT_DELTA_T,
+    base_thickness_m: Optional[float] = None,
+    material_conductivity_w_mk: float = MATERIALS[DEFAULT_MATERIAL_KEY].thermal_conductivity_w_mk,
+    base_contact_area_m2: Optional[float] = None,
 ) -> ThermalResult:
-    """Compute convection coefficient and resulting heat transfer capability."""
+    """Compute convection coefficient and resulting heat transfer capability.
 
+    Модель: 1D-цепочка
+        источник -> теплопроводность через основание -> конвекция в воздух
+
+    Если power_input_w is None:
+        * target_overtemp_c трактуем как ΔT_источника над воздухом,
+        * Q_max = ΔT / (R_cond + R_conv).
+
+    Если power_input_w задано:
+        * Q = power_input_w,
+        * считаем перегревы и температуру поверхности радиатора.
+    """
+
+    # Конвекция — как раньше
     h = convection_coefficient_natural(geometry, target_overtemp_c)
-    heat_w = h * geometry.effective_area_m2 * target_overtemp_c
 
-    surface_temp_c = environment.temperature_c + heat_w / (h * geometry.effective_area_m2)
-    if power_input_w is not None and geometry.effective_area_m2 > 0:
-        surface_temp_c = environment.temperature_c + power_input_w / (
-            h * geometry.effective_area_m2
+    a_eff = max(geometry.effective_area_m2, 1e-12)
+    a_base = base_contact_area_m2 if base_contact_area_m2 is not None else geometry.base_area_m2
+    a_base = max(a_base, 1e-12)
+
+    # Сопротивление конвекции
+    r_conv = 1.0 / (h * a_eff)
+
+    # Сопротивление теплопроводности основания
+    if base_thickness_m is not None and base_thickness_m > 0.0 and material_conductivity_w_mk > 0.0:
+        r_cond = base_thickness_m / (material_conductivity_w_mk * a_base)
+    else:
+        r_cond = 0.0
+
+    r_tot = r_conv + r_cond
+
+    # --- Режим без заданной мощности: считаем Q_max ---
+    if power_input_w is None:
+        if r_tot <= 0.0:
+            heat_w = 0.0
+            surface_temp_c = environment.temperature_c
+        else:
+            heat_w = target_overtemp_c / r_tot
+            delta_t_surface = heat_w * r_conv
+            surface_temp_c = environment.temperature_c + delta_t_surface
+
+        return ThermalResult(
+            convection_coefficient=h,
+            heat_dissipation_w=heat_w,
+            surface_temperature_c=surface_temp_c,
         )
-        heat_w = power_input_w
+
+    # --- Режим с заданной мощностью ---
+    q = max(power_input_w, 0.0)
+    delta_t_surface = q * r_conv
+    surface_temp_c = environment.temperature_c + delta_t_surface
 
     return ThermalResult(
         convection_coefficient=h,
-        heat_dissipation_w=heat_w,
+        heat_dissipation_w=q,
         surface_temperature_c=surface_temp_c,
     )
 
@@ -204,9 +308,11 @@ def generate_performance_curve(
     humidity_points: Tuple[float, ...] = (30.0, 60.0, 90.0),
     temp_range_c: Tuple[int, int, int] = (0, 81, 5),
     delta_t_c: float = DEFAULT_DELTA_T,
+    base_thickness_m: Optional[float] = None,
+    material_conductivity_w_mk: float = MATERIALS[DEFAULT_MATERIAL_KEY].thermal_conductivity_w_mk,
+    base_contact_area_m2: Optional[float] = None,
 ) -> Dict[str, List[Tuple[float, float]]]:
     """Generate Q_max vs ambient temperature curves for several humidity levels."""
-
     t_min, t_max, t_step = temp_range_c
     temps = list(np.arange(t_min, t_max, t_step))
     curves: Dict[str, List[Tuple[float, float]]] = {}
@@ -214,7 +320,15 @@ def generate_performance_curve(
         data: List[Tuple[float, float]] = []
         for temp in temps:
             env = Environment(temperature_c=temp, relative_humidity=rh)
-            result = estimate_heat_dissipation(geometry, env, target_overtemp_c=delta_t_c)
+            result = estimate_heat_dissipation(
+                geometry,
+                env,
+                power_input_w=None,
+                target_overtemp_c=delta_t_c,
+                base_thickness_m=base_thickness_m,
+                material_conductivity_w_mk=material_conductivity_w_mk,
+                base_contact_area_m2=base_contact_area_m2,
+            )
             data.append((temp, result.heat_dissipation_w))
         curves[f"RH {rh:.0f}%"] = data
     return curves
