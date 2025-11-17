@@ -1,8 +1,8 @@
 """Workbench registration placeholder for FreeCAD."""
 from __future__ import annotations
 
-import importlib.util
 import sys
+from importlib import util as importlib_util
 from pathlib import Path
 
 def _has_freecad_gui() -> bool:
@@ -14,8 +14,10 @@ def _has_freecad_gui() -> bool:
     """
 
     try:
-        spec = importlib.util.find_spec("FreeCADGui")
-    except ValueError:
+        spec = importlib_util.find_spec("FreeCADGui")
+    except (ValueError, NameError):
+        # NameError covers environments that strip importlib during FreeCAD
+        # startup; fall back to the modules already loaded.
         return "FreeCADGui" in sys.modules
     return spec is not None
 
