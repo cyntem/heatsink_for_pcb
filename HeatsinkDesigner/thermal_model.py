@@ -30,7 +30,7 @@ AIR_VISCOSITY = 1.85e-5  # Pa*s
 
 
 # ---------------------------------------------------------------------------
-# Служебные структуры
+# Helper structures
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -44,11 +44,11 @@ class DependencyStatus:
         messages: List[str] = []
         if not self.ht_available:
             messages.append(
-                "Не установлена библиотека ht. Установите через pip: pip install ht"
+                "Library ht is not installed. Install via pip: pip install ht"
             )
         if not self.fluids_available:
             messages.append(
-                "Не установлена библиотека fluids. Установите через pip: pip install fluids"
+                "Library fluids is not installed. Install via pip: pip install fluids"
             )
         return messages
 
@@ -89,11 +89,11 @@ class Material:
 
 
 # ---------------------------------------------------------------------------
-# Библиотека материалов радиаторов
+# Heatsink material library
 # ---------------------------------------------------------------------------
 
 MATERIALS: Dict[str, Material] = {
-    # Типичные алюминиевые сплавы для радиаторов
+    # Typical aluminum alloys for heatsinks
     "al_6061": Material(
         key="al_6061",
         label="Aluminium 6061-T6 (~167 W/m·K)",
@@ -109,7 +109,7 @@ MATERIALS: Dict[str, Material] = {
         label="Aluminium 3003 (~160 W/m·K)",
         thermal_conductivity_w_mk=160.0,
     ),
-    # Медь и латунь
+    # Copper and brass
     "cu_ofhc": Material(
         key="cu_ofhc",
         label="Copper OFHC (~390 W/m·K)",
@@ -120,7 +120,7 @@ MATERIALS: Dict[str, Material] = {
         label="Brass (~110 W/m·K)",
         thermal_conductivity_w_mk=110.0,
     ),
-    # Нержавейка
+    # Stainless steel
     "ss_304": Material(
         key="ss_304",
         label="Stainless steel 304 (~16 W/m·K)",
@@ -128,7 +128,7 @@ MATERIALS: Dict[str, Material] = {
     ),
 }
 
-# По умолчанию самый типичный радиаторный алюминий
+# Default material is a typical heatsink-grade aluminum
 DEFAULT_MATERIAL_KEY = "al_6061"
 
 
@@ -140,7 +140,7 @@ def get_material(key: Optional[str]) -> Material:
 
 
 # ---------------------------------------------------------------------------
-# Базовые функции
+# Basic functions
 # ---------------------------------------------------------------------------
 
 def dependency_status() -> DependencyStatus:
@@ -231,7 +231,7 @@ def estimate_fin_efficiency(
 
 
 # ---------------------------------------------------------------------------
-# Основная тепловая модель: конвекция + теплопроводность основания
+# Main thermal model: convection + base conduction
 # ---------------------------------------------------------------------------
 
 def estimate_heat_dissipation(
@@ -245,29 +245,29 @@ def estimate_heat_dissipation(
 ) -> ThermalResult:
     """Compute convection coefficient and resulting heat transfer capability.
 
-    Модель: 1D-цепочка
-        источник -> теплопроводность через основание -> конвекция в воздух
+    Model: 1D chain
+        source -> conduction through base -> convection to air
 
-    Если power_input_w is None:
-        * target_overtemp_c трактуем как ΔT_источника над воздухом,
+    If power_input_w is None:
+        * treat target_overtemp_c as ΔT of the source over ambient air,
         * Q_max = ΔT / (R_cond + R_conv).
 
-    Если power_input_w задано:
+    If power_input_w is provided:
         * Q = power_input_w,
-        * считаем перегревы и температуру поверхности радиатора.
+        * compute temperature rise and heatsink surface temperature.
     """
 
-    # Конвекция — как раньше
+    # Convection — same as before
     h = convection_coefficient_natural(geometry, target_overtemp_c)
 
     a_eff = max(geometry.effective_area_m2, 1e-12)
     a_base = base_contact_area_m2 if base_contact_area_m2 is not None else geometry.base_area_m2
     a_base = max(a_base, 1e-12)
 
-    # Сопротивление конвекции
+    # Convection resistance
     r_conv = 1.0 / (h * a_eff)
 
-    # Сопротивление теплопроводности основания
+    # Conduction resistance through the base
     if base_thickness_m is not None and base_thickness_m > 0.0 and material_conductivity_w_mk > 0.0:
         r_cond = base_thickness_m / (material_conductivity_w_mk * a_base)
     else:
@@ -275,7 +275,7 @@ def estimate_heat_dissipation(
 
     r_tot = r_conv + r_cond
 
-    # --- Режим без заданной мощности: считаем Q_max ---
+    # --- Mode without specified power: compute Q_max ---
     if power_input_w is None:
         if r_tot <= 0.0:
             heat_w = 0.0
@@ -291,7 +291,7 @@ def estimate_heat_dissipation(
             surface_temperature_c=surface_temp_c,
         )
 
-    # --- Режим с заданной мощностью ---
+    # --- Mode with specified power ---
     q = max(power_input_w, 0.0)
     delta_t_surface = q * r_conv
     surface_temp_c = environment.temperature_c + delta_t_surface

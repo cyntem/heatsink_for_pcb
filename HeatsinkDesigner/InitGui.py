@@ -15,7 +15,7 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
     def __init__(self):
         super().__init__()
 
-        # Надёжное вычисление пути к иконке
+        # Reliable icon path resolution
         try:
             base_dir = os.path.dirname(__file__)
         except NameError:
@@ -23,39 +23,39 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
 
         self.Icon = os.path.join(base_dir, "icons", "heatsink.svg")
 
-        # Команды будут загружены в Initialize()
+        # Commands will be loaded in Initialize()
         self._commands = {}
         self._cmd_names = []
 
-    # --- внутренний загрузчик команд ----------------------------------------
+    # --- internal command loader ----------------------------------------
     def _load_commands(self):
-        """Попытаться импортировать gui_commands несколькими способами."""
+        """Try to import gui_commands in several ways."""
 
         last_exc = None
 
-        # 1) Относительный импорт — нормальный случай (пакет HeatsinkDesigner)
+        # 1) Relative import — normal case when packaged
         try:
             from . import gui_commands as gc  # type: ignore[attr-defined]
             return gc.COMMANDS  # type: ignore[attr-defined]
         except Exception as exc:
             last_exc = exc
 
-        # 2) Импорт как пакета HeatsinkDesigner.gui_commands
+        # 2) Import as HeatsinkDesigner.gui_commands package
         try:
             import HeatsinkDesigner.gui_commands as gc  # type: ignore[attr-defined]
             return gc.COMMANDS  # type: ignore[attr-defined]
         except Exception as exc:
             last_exc = exc
 
-        # 3) Фоллбек: gui_commands как верхнеуровневый модуль
+        # 3) Fallback: gui_commands as a top-level module
         try:
             import gui_commands as gc  # type: ignore[attr-defined]
             return gc.COMMANDS  # type: ignore[attr-defined]
         except Exception as exc:
             last_exc = exc
 
-        # Ни один вариант не сработал — печатаем в Report view
-        # Формируем валидный Python-код: print("...", <repr(exc)>)
+        # None of the options worked — print to the Report view
+        # Build valid Python code: print("...", <repr(exc)>)
         if last_exc is not None:
             Gui.doCommand(
                 'print("HeatsinkDesigner: failed to import gui_commands; last error:", %r)'
@@ -68,29 +68,29 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
 
         return {}
 
-    # --- инициализация воркбенча --------------------------------------------
+    # --- workbench initialization --------------------------------------------
     def Initialize(self):
-        """Регистрация команд в FreeCAD.
+        """Register commands in FreeCAD.
 
-        FreeCAD вызывает этот метод, когда пользователь впервые
-        переключается на этот воркбенч.
+        FreeCAD calls this method when the user first
+        switches to this workbench.
         """
         self._commands = self._load_commands()
         self._cmd_names = list(self._commands.keys())
 
-        # Регистрируем команды
+        # Register commands
         for name, handler in self._commands.items():
             Gui.addCommand(name, handler)
 
-        # Панель инструментов и меню, только если команды есть
+        # Toolbar and menu only if commands are available
         if self._cmd_names:
             self.appendToolbar("HeatsinkDesigner", self._cmd_names)
             self.appendMenu("&HeatsinkDesigner", self._cmd_names)
 
     def GetClassName(self):  # noqa: N802
-        # Для чисто питонового воркбенча нужно вернуть именно эту строку
+        # Pure Python workbench must return this string
         return "Gui::PythonWorkbench"
 
 
-# Регистрация воркбенча в GUI
+# Workbench registration in the GUI
 Gui.addWorkbench(HeatsinkDesignerWorkbench())

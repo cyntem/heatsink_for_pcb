@@ -1,51 +1,51 @@
 # Heatsink Designer Workbench (FreeCAD)
 
-Расширение **HeatsinkDesignerWB** добавляет в FreeCAD инструмент для параметрической генерации радиаторов и оценки их теплоотдачи. Код организован как лёгкий Python-пакет, который можно поместить в папку `Mod` FreeCAD и использовать даже без GUI для предварительных расчётов.
+The **HeatsinkDesignerWB** extension adds a FreeCAD tool for parametrically generating heatsinks and estimating their heat dissipation. The code is organized as a lightweight Python package that can live in the FreeCAD `Mod` folder and can also be used without the GUI for quick calculations.
 
-## Возможности
+## Features
 
-- Четыре CNC-дружественных типа радиаторов: сплошная пластина, прямые фрезерованные рёбра, решётка (crosscut) и штыревые пины.
-- Два режима работы (плоскость/эскиз и задание габаритов), пригодные для Task Panel в FreeCAD.
-- Упрощённые тепловые расчёты на основе конвекции при естественном охлаждении и учёте эффективности рёбер.
-- Генерация графиков зависимости рассеиваемой мощности от температуры окружающей среды и влажности.
-- Проверка наличия опциональных библиотек (`ht`, `fluids`) с понятными сообщениями.
+- Four CNC-friendly heatsink types: solid plate, straight milled fins, crosscut grid, and pin-fin array.
+- Two operating modes (face/sketch driven and dimension driven) suitable for a FreeCAD Task Panel.
+- Simplified thermal calculations based on natural convection and fin efficiency.
+- Plot generation for the relationship between dissipated power, ambient temperature, and humidity.
+- Dependency checks for optional libraries (`ht`, `fluids`) with clear messages.
 
-## Структура
+## Structure
 
-- `HeatsinkDesigner/Init.py` и `HeatsinkDesigner/InitGui.py` — точки входа Workbench’а, безопасные для окружений без FreeCAD.
-- `cnc_defaults.py` — минимальные размеры и рекомендуемые значения под настольный ЧПУ.
-- `heatsink_types.py` — описание поддерживаемых типов и параметров.
-- `geometry_builder.py` — приближённое построение геометрии и расчёт эффективной площади теплообмена.
-- `thermal_model.py` — тепловые расчёты, зависящие от параметров геометрии и среды.
-- `gui_face_mode.py` и `gui_dim_mode.py` — логика двух режимов Task Panel без привязки к конкретным UI-элементам.
-- `icons/` — иконка Workbench’а.
-- `tests/` — минимальные модульные тесты тепловой части и генератора геометрии.
+- `HeatsinkDesigner/Init.py` and `HeatsinkDesigner/InitGui.py` — Workbench entry points that are safe to import even without FreeCAD GUI.
+- `cnc_defaults.py` — minimal dimensions and recommended values for desktop CNC milling.
+- `heatsink_types.py` — definitions of supported heatsink types and parameters.
+- `geometry_builder.py` — approximate geometry construction and effective surface-area calculation.
+- `thermal_model.py` — thermal calculations based on geometry and environment parameters.
+- `gui_face_mode.py` and `gui_dim_mode.py` — logic for two Task Panel modes without binding to specific UI widgets.
+- `icons/` — Workbench icon.
+- `tests/` — minimal unit tests for the thermal module and geometry generator.
 
-## Требования
+## Requirements
 
-- Python 3.x (используется тот, что встроен в FreeCAD 1.0+).
-- Рекомендуемые внешние пакеты: `numpy`, `matplotlib`, `ht`, `fluids`. При отсутствии `ht` и `fluids` расчёты используют встроённые приближённые коэффициенты.
+- Python 3.x (the version bundled with FreeCAD 1.0+).
+- Recommended external packages: `numpy`, `matplotlib`, `ht`, `fluids`. If `ht` and `fluids` are missing, built-in approximate coefficients are used.
 
-`requirements.txt` содержит полный список опциональных зависимостей. Их можно установить через встроенный в FreeCAD интерпретатор Python:
+`requirements.txt` lists all optional dependencies. Install them using the Python interpreter bundled with FreeCAD:
 
 - **Windows:** `"C:\\Program Files\\FreeCAD 1.0\\bin\\python.exe" -m pip install -r requirements.txt`
-- **macOS (приложение):** `/Applications/FreeCAD.app/Contents/Resources/bin/python3 -m pip install -r requirements.txt`
-- **Linux (классическая установка):** `python3 -m pip install -r requirements.txt`
+- **macOS (app bundle):** `/Applications/FreeCAD.app/Contents/Resources/bin/python3 -m pip install -r requirements.txt`
+- **Linux (classic install):** `python3 -m pip install -r requirements.txt`
 - **Linux Snap:** `snap run --shell freecad --command python3 -m pip install -r requirements.txt`
 
-## Установка и запуск в FreeCAD
+## Installation and launch in FreeCAD
 
-1. Скопируйте папку `HeatsinkDesigner` в каталог `Mod` вашего FreeCAD:
-   - для классических установок: `~/.local/share/FreeCAD/Mod` (Linux), `%APPDATA%/FreeCAD/Mod` (Windows), `~/Library/Preferences/FreeCAD/Mod` (macOS);
-   - для Snap-пакета FreeCAD 1.0.2: `~/snap/freecad/common/Mod`.
-2. Перезапустите FreeCAD. В списке Workbench появится запись **HeatsinkDesigner** с двумя командами: генерация по грани/эскизу и по габаритам.
-3. В каждом Task Panel вы увидите параметры выбранного типа радиатора и кнопки для генерации модели, расчёта теплового режима и построения графика.
+1. Copy the `HeatsinkDesigner` folder into the `Mod` directory of your FreeCAD installation:
+   - Classic installs: `~/.local/share/FreeCAD/Mod` (Linux), `%APPDATA%/FreeCAD/Mod` (Windows), `~/Library/Preferences/FreeCAD/Mod` (macOS);
+   - Snap package (FreeCAD 1.0.2): `~/snap/freecad/common/Mod`.
+2. Restart FreeCAD. The **HeatsinkDesigner** Workbench appears with two commands: generation from a face/sketch and generation from dimensions.
+3. Each Task Panel shows parameters for the selected heatsink type plus buttons for model generation, thermal calculation, and chart creation.
 
-> Начиная с FreeCAD 1.0.2 модуль корректно инициализируется, даже если `FreeCADGui.__spec__` не задан (типичный случай в Snap-сборке).
+> Starting with FreeCAD 1.0.2 the module initializes correctly even if `FreeCADGui.__spec__` is missing (typical for the Snap build).
 
-## Использование без FreeCAD
+## Usage without FreeCAD
 
-Тепловую часть можно использовать как обычный модуль Python:
+The thermal portion can be used as a regular Python module:
 
 ```python
 from HeatsinkDesigner.geometry_builder import build_geometry
@@ -60,12 +60,12 @@ result = estimate_heat_dissipation(details.geometry, Environment(), power_input_
 print(result)
 ```
 
-## Тестирование
+## Testing
 
-Запустите тесты локально (понадобится `pytest`):
+Run the tests locally (requires `pytest`):
 
 ```bash
 pytest
 ```
 
-Команда покрывает базовые проверки тепловых расчётов и генерации геометрии.
+The command covers basic checks for the thermal calculations and geometry generation.

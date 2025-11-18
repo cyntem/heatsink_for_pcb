@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
-# ---- импорты модулей воркбенча ---------------------------------------------
+# ---- workbench module imports ---------------------------------------------
 try:
     from HeatsinkDesigner.geometry_builder import (
         BaseDimensions,
@@ -94,22 +94,22 @@ class DimensionModeTaskPanel:
 
         layout = QtWidgets.QVBoxLayout(self.form)
 
-        header = QtWidgets.QLabel("<b>Heatsink по габаритам</b>")
+        header = QtWidgets.QLabel("<b>Heatsink by dimensions</b>")
         header.setWordWrap(True)
         layout.addWidget(header)
 
         hint = QtWidgets.QLabel(
-            "Введите габариты радиатора. В тепловых параметрах:\n"
-            "  1) ΔT — допустимый перегрев;\n"
-            "  2) режим анализа — P_load по высоте или высота по P_load;\n"
-            "  3) в зависимости от режима задаётся либо P_load, либо высота.\n"
-            "Результат пересчитывается автоматически, кнопка строит 3D-модель."
+            "Enter heatsink dimensions. Thermal parameters:\n"
+            "  1) ΔT — allowed over-temperature;\n"
+            "  2) analysis mode — P_load from height or height from P_load;\n"
+            "  3) depending on the mode either P_load or height is provided.\n"
+            "Results are recalculated automatically; the button builds a 3D model."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        # Габариты
-        dims_group = QtWidgets.QGroupBox("Габариты (мм)")
+        # Dimensions
+        dims_group = QtWidgets.QGroupBox("Dimensions (mm)")
         dims_layout = QtWidgets.QFormLayout(dims_group)
 
         self.length_spin = QtWidgets.QDoubleSpinBox()
@@ -117,38 +117,38 @@ class DimensionModeTaskPanel:
         self.length_spin.setDecimals(2)
         self.length_spin.setSingleStep(0.1)
         self.length_spin.setValue(100.0)
-        self.length_spin.setSuffix(" мм")
-        dims_layout.addRow("Длина L:", self.length_spin)
+        self.length_spin.setSuffix(" mm")
+        dims_layout.addRow("Length L:", self.length_spin)
 
         self.width_spin = QtWidgets.QDoubleSpinBox()
         self.width_spin.setRange(1.0, 1e6)
         self.width_spin.setDecimals(2)
         self.width_spin.setSingleStep(0.1)
         self.width_spin.setValue(50.0)
-        self.width_spin.setSuffix(" мм")
-        dims_layout.addRow("Ширина W:", self.width_spin)
+        self.width_spin.setSuffix(" mm")
+        dims_layout.addRow("Width W:", self.width_spin)
 
         self.base_thickness_spin = QtWidgets.QDoubleSpinBox()
         self.base_thickness_spin.setRange(0.5, 1e6)
         self.base_thickness_spin.setDecimals(2)
         self.base_thickness_spin.setSingleStep(0.1)
         self.base_thickness_spin.setValue(5.0)
-        self.base_thickness_spin.setSuffix(" мм")
-        dims_layout.addRow("Толщина основания:", self.base_thickness_spin)
+        self.base_thickness_spin.setSuffix(" mm")
+        dims_layout.addRow("Base thickness:", self.base_thickness_spin)
 
         layout.addWidget(dims_group)
 
-        # Тепловые параметры
-        therm_group = QtWidgets.QGroupBox("Тепловые параметры")
+        # Thermal parameters
+        therm_group = QtWidgets.QGroupBox("Thermal parameters")
         self.therm_layout = QtWidgets.QFormLayout(therm_group)
 
         self.delta_t_spin = QtWidgets.QDoubleSpinBox()
         self.delta_t_spin.setRange(1.0, 200.0)
         self.delta_t_spin.setValue(40.0)
         self.delta_t_spin.setSuffix(" °C")
-        self.therm_layout.addRow("Допустимый перегрев ΔT:", self.delta_t_spin)
+        self.therm_layout.addRow("Allowed over-temperature ΔT:", self.delta_t_spin)
 
-        # Материал радиатора
+        # Heatsink material
         self.material_combo = QtWidgets.QComboBox()
         self._material_keys = list(MATERIALS.keys())
         for key in self._material_keys:
@@ -157,39 +157,39 @@ class DimensionModeTaskPanel:
         if DEFAULT_MATERIAL_KEY in self._material_keys:
             idx = self._material_keys.index(DEFAULT_MATERIAL_KEY)
             self.material_combo.setCurrentIndex(idx)
-        self.therm_layout.addRow("Материал радиатора:", self.material_combo)
+        self.therm_layout.addRow("Heatsink material:", self.material_combo)
 
         self.analysis_mode_combo = QtWidgets.QComboBox()
-        self.analysis_mode_combo.addItem("Рассчитать P_load по высоте", userData="h_to_q")
-        self.analysis_mode_combo.addItem("Рассчитать высоту по P_load", userData="q_to_h")
-        self.therm_layout.addRow("Режим анализа:", self.analysis_mode_combo)
+        self.analysis_mode_combo.addItem("Compute P_load from height", userData="h_to_q")
+        self.analysis_mode_combo.addItem("Compute height from P_load", userData="q_to_h")
+        self.therm_layout.addRow("Analysis mode:", self.analysis_mode_combo)
 
-        # параметр в зависимости от режима
+        # parameter depending on mode
         self.power_label = QtWidgets.QLabel("P_load:")
         self.power_spin = QtWidgets.QDoubleSpinBox()
         self.power_spin.setRange(0.0, 1e6)
         self.power_spin.setDecimals(1)
-        self.power_spin.setSuffix(" Вт")
+        self.power_spin.setSuffix(" W")
         self.therm_layout.addRow(self.power_label, self.power_spin)
 
-        self.height_label = QtWidgets.QLabel("Высота (раб.):")
+        self.height_label = QtWidgets.QLabel("Height (working):")
         self.height_spin = QtWidgets.QDoubleSpinBox()
         self.height_spin.setRange(1.0, 1e6)
         self.height_spin.setDecimals(2)
-        self.height_spin.setSingleStep(0.1)  # шаг 0.1 мм
+        self.height_spin.setSingleStep(0.1)  # step 0.1 mm
         self.height_spin.setValue(20.0)
-        self.height_spin.setSuffix(" мм")
+        self.height_spin.setSuffix(" mm")
         self.therm_layout.addRow(self.height_label, self.height_spin)
 
         layout.addWidget(therm_group)
 
-        # Выбор типа
-        type_group = QtWidgets.QGroupBox("Тип радиатора")
+        # Type selection
+        type_group = QtWidgets.QGroupBox("Heatsink type")
         type_layout = QtWidgets.QHBoxLayout(type_group)
 
-        type_label = QtWidgets.QLabel("Тип:")
+        type_label = QtWidgets.QLabel("Type:")
         self.type_combo = QtWidgets.QComboBox()
-        self.type_combo.addItem("Авто (подбор оптимального)", userData="__auto__")
+        self.type_combo.addItem("Auto (pick optimal)", userData="__auto__")
         self._type_keys: List[str] = list(SUPPORTED_TYPES.keys())
         for key in self._type_keys:
             self.type_combo.addItem(SUPPORTED_TYPES[key].label, userData=key)
@@ -199,15 +199,15 @@ class DimensionModeTaskPanel:
 
         layout.addWidget(type_group)
 
-        # Результат
-        self.result_label = QtWidgets.QLabel("Результат ещё не вычислен.")
+        # Result
+        self.result_label = QtWidgets.QLabel("Result has not been computed yet.")
         self.result_label.setWordWrap(True)
         layout.addWidget(self.result_label)
 
-        # Кнопки
+        # Buttons
         btn_row = QtWidgets.QHBoxLayout()
-        self.btn_pick_generate = QtWidgets.QPushButton("Подобрать и сгенерировать")
-        self.btn_chart = QtWidgets.QPushButton("График Q_max(h) (все типы)")
+        self.btn_pick_generate = QtWidgets.QPushButton("Pick and generate")
+        self.btn_chart = QtWidgets.QPushButton("Q_max(h) chart (all types)")
 
         self.btn_pick_generate.clicked.connect(self._on_generate_clicked)
         self.btn_chart.clicked.connect(self._on_chart_clicked)
@@ -218,7 +218,7 @@ class DimensionModeTaskPanel:
 
         layout.addStretch(1)
 
-        # Автопересчёт
+        # Auto recalculation
         for spin in (
             self.length_spin,
             self.width_spin,
@@ -249,13 +249,13 @@ class DimensionModeTaskPanel:
     def _on_analysis_mode_changed(self, index: int) -> None:
         mode = self.analysis_mode_combo.currentData()
         if mode == "h_to_q":
-            # считаем P_load по высоте → высота видна
+            # compute P_load from height → height visible
             self.power_label.setVisible(False)
             self.power_spin.setVisible(False)
             self.height_label.setVisible(True)
             self.height_spin.setVisible(True)
         else:
-            # считаем высоту по P_load → P_load виден
+            # compute height from P_load → P_load visible
             self.power_label.setVisible(True)
             self.power_spin.setVisible(True)
             self.height_label.setVisible(False)
@@ -268,7 +268,7 @@ class DimensionModeTaskPanel:
         base_t = float(self.base_thickness_spin.value())
         if length <= 0 or width <= 0 or base_t <= 0:
             self.result_label.setText(
-                "Длина, ширина и толщина основания должны быть больше нуля."
+                "Length, width, and base thickness must be greater than zero."
             )
             return None
         return DimensionInput(length_mm=length, width_mm=width, base_thickness_mm=base_t)
@@ -291,7 +291,7 @@ class DimensionModeTaskPanel:
         p_req: float,
         material_k: float,
     ) -> Optional[float]:
-        """Найти высоту для данного типа по требуемой мощности (без H_max)."""
+    """Find height for this type given required power (without H_max)."""
         env = Environment()
         hp = HEIGHT_PARAM_MAP.get(type_key)
         if not hp:
@@ -300,7 +300,7 @@ class DimensionModeTaskPanel:
         params_base = self._default_params_for_type(type_key, dim, use_height_spin=False)
         params_base["material_conductivity_w_mk"] = material_k
 
-        H_CAP = 1000.0  # 1 м
+        H_CAP = 1000.0  # 1 m
 
         def q_for_height(h_mm: float) -> float:
             p = dict(params_base)
@@ -323,7 +323,7 @@ class DimensionModeTaskPanel:
             )
             return res.heat_dissipation_w
 
-        # поиск от 1 мм, чтобы высота могла и уменьшаться
+        # search from 1 mm so the height can also decrease
         h_min = 1.0
         q_min = q_for_height(h_min)
         if q_min >= p_req:
@@ -335,7 +335,7 @@ class DimensionModeTaskPanel:
         while h_high <= H_CAP:
             q_high = q_for_height(h_high)
             if q_high >= p_req:
-                # бинарный поиск
+                # binary search
                 for _ in range(20):
                     h_mid = 0.5 * (h_low + h_high)
                     q_mid = q_for_height(h_mid)
@@ -352,10 +352,10 @@ class DimensionModeTaskPanel:
     def _compute_best_config(
         self,
     ) -> Tuple[Optional[str], Optional[Dict[str, float]], Optional[GeometryDetails], str]:
-        """Вычислить лучший вариант (по текущему режиму анализа) без генерации 3D."""
+    """Compute the best option for the current analysis mode without generating 3D."""
         dim = self._dimension_input()
         if dim is None:
-            return None, None, None, "Некорректные габариты."
+            return None, None, None, "Invalid dimensions."
 
         delta_t = float(self.delta_t_spin.value())
         env = Environment()
@@ -367,7 +367,7 @@ class DimensionModeTaskPanel:
 
         base_thickness_m = dim.base_thickness_mm / 1000.0
 
-        # ----- режим: P_load по высоте -----
+        # ----- mode: P_load from height -----
         if mode == "h_to_q":
             best_type_key: Optional[str] = None
             best_params: Optional[Dict[str, float]] = None
@@ -382,7 +382,7 @@ class DimensionModeTaskPanel:
                     use_height_spin=True,
                 )
                 params["material_conductivity_w_mk"] = mat.thermal_conductivity_w_mk
-                # Толщина основания: для пластины — высота, для остальных — dim.base_thickness_mm
+                # Base thickness: for plate use height, for others use dim.base_thickness_mm
                 if type_key == "solid_plate":
                     base_t_mm = float(self.height_spin.value())
                 else:
@@ -409,21 +409,21 @@ class DimensionModeTaskPanel:
                     best_details = details
 
             if best_type_key is None or best_params is None or best_details is None:
-                return None, None, None, "Не удалось подобрать конфигурацию."
+                return None, None, None, "Failed to find a configuration."
 
             label = SUPPORTED_TYPES[best_type_key].label
             text = (
-                "Режим: P_load по высоте\n"
-                f"Тип радиатора: {label}\n"
-                f"Материал: {mat.label}\n"
-                f"Макс. допустимая мощность P_load_max ≈ {best_q:.1f} Вт\n"
-                f"при ΔT = {delta_t:.1f} °C."
+                "Mode: P_load from height\n"
+                f"Heatsink type: {label}\n"
+                f"Material: {mat.label}\n"
+                f"Max allowable power P_load_max ≈ {best_q:.1f} W\n"
+                f"at ΔT = {delta_t:.1f} °C."
             )
             return best_type_key, best_params, best_details, text
 
-        # ----- режим: высота по P_load -----
+        # ----- mode: height from P_load -----
         if p_req <= 0.0:
-            return None, None, None, "Режим: высота по P_load. Задайте P_load > 0 Вт."
+            return None, None, None, "Mode: height from P_load. Provide P_load > 0 W."
 
         type_list = self._type_keys if auto_mode else [str(current_data)]
 
@@ -449,8 +449,8 @@ class DimensionModeTaskPanel:
                 None,
                 None,
                 None,
-                "Не удалось подобрать тип и высоту для заданной мощности.\n"
-                "Уменьшите P_load или увеличьте площадь основания.",
+                "Could not pick a type and height for the requested power.\n"
+                "Reduce P_load or increase the base area.",
             )
 
         hp_final = HEIGHT_PARAM_MAP.get(best_type_key)
@@ -464,7 +464,7 @@ class DimensionModeTaskPanel:
             h_round = max(1.0, round(best_h))
             params[hp_final] = h_round
 
-            # Толщина основания
+            # Base thickness
             if best_type_key == "solid_plate":
                 base_t_mm_final = h_round
             else:
@@ -482,23 +482,23 @@ class DimensionModeTaskPanel:
                 base_contact_area_m2=details.geometry.base_area_m2,
             )
 
-            # обновим высоту в UI
+            # update height in UI
             self.height_spin.blockSignals(True)
             self.height_spin.setValue(h_round)
             self.height_spin.blockSignals(False)
 
             label = SUPPORTED_TYPES[best_type_key].label
             text = (
-                "Режим: высота по P_load\n"
-                f"Тип радиатора: {label}\n"
-                f"Материал: {mat.label}\n"
-                f"Необходимая высота ≈ {h_round:.0f} мм\n"
-                f"для P_load = {p_req:.1f} Вт и ΔT = {delta_t:.1f} °C.\n"
-                f"Q_max при этой высоте ≈ {res.heat_dissipation_w:.1f} Вт."
+                "Mode: height from P_load\n"
+                f"Heatsink type: {label}\n"
+                f"Material: {mat.label}\n"
+                f"Required height ≈ {h_round:.0f} mm\n"
+                f"for P_load = {p_req:.1f} W and ΔT = {delta_t:.1f} °C.\n"
+                f"Q_max at this height ≈ {res.heat_dissipation_w:.1f} W."
             )
             return best_type_key, params, details, text
 
-        return None, None, None, "Не удалось вычислить высоту."
+        return None, None, None, "Failed to compute height."
 
     # ----------------------------------------------------- label + 3D --------
     def _update_result_label(self) -> None:
@@ -529,7 +529,7 @@ class DimensionModeTaskPanel:
             QtWidgets.QMessageBox.critical(
                 self.form,
                 "HeatsinkDesigner",
-                "FreeCAD недоступен для построения 3D-модели",
+                "FreeCAD is not available for 3D model construction",
             )
             return
 
@@ -544,17 +544,17 @@ class DimensionModeTaskPanel:
             QtWidgets.QMessageBox.critical(
                 self.form,
                 "HeatsinkDesigner",
-                f"Ошибка построения 3D-модели:\n{exc}",
+                f"3D model construction error:\n{exc}",
             )
             return
 
         App.Console.PrintMessage(
-            f"[HeatsinkDesigner] Создан радиатор: {obj.Name} ({obj.Label})\n"
+            f"[HeatsinkDesigner] Created heatsink: {obj.Name} ({obj.Label})\n"
         )
 
-    # ----------------------------------------------------- график Q(h) -------
+    # ----------------------------------------------------- Q(h) chart -------
     def _on_chart_clicked(self) -> None:
-        """Построить Q_max(h) для всех типов радиаторов на одном графике."""
+        """Plot Q_max(h) for all heatsink types on one chart."""
         QtWidgets = self._QtWidgets
         dim = self._dimension_input()
         if dim is None:
@@ -566,7 +566,7 @@ class DimensionModeTaskPanel:
             QtWidgets.QMessageBox.critical(
                 self.form,
                 "HeatsinkDesigner",
-                "Библиотека matplotlib не установлена",
+                "matplotlib library is not installed",
             )
             return
 
@@ -574,7 +574,7 @@ class DimensionModeTaskPanel:
         delta_t = float(self.delta_t_spin.value())
         mat = self._current_material()
 
-        H_PLOT_MAX = 100.0  # мм – диапазон для графика
+        H_PLOT_MAX = 100.0  # mm – plotting range
         h_min = 1.0
         h_max = max(float(self.height_spin.value()) * 2.0, H_PLOT_MAX)
         steps = 12
@@ -596,7 +596,7 @@ class DimensionModeTaskPanel:
             for h in heights:
                 params = dict(params_base)
                 params[hp] = h
-                # Толщина основания
+                # Base thickness
                 if type_key == "solid_plate":
                     base_t_mm = h
                 else:
@@ -618,9 +618,9 @@ class DimensionModeTaskPanel:
             label = SUPPORTED_TYPES[type_key].label
             plt.plot(heights, q_values, marker="o", label=label)
 
-        plt.xlabel("Высота, мм")
-        plt.ylabel(f"Q_max при ΔT = {delta_t:.1f} °C, Вт")
-        plt.title("Q_max(h) для разных типов радиаторов")
+        plt.xlabel("Height, mm")
+        plt.ylabel(f"Q_max at ΔT = {delta_t:.1f} °C, W")
+        plt.title("Q_max(h) for different heatsink types")
         plt.grid(True)
         plt.legend()
         plt.show()

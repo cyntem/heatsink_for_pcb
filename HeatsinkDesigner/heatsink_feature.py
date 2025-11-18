@@ -1,14 +1,14 @@
 """Simple solid builder for heatsinks based on a selected face/sketch shape.
 
-Создаёт обычный Part::Feature "Heatsink" с готовой формой радиатора.
-Параметры управляются через Task Panel (Face/Sketch Mode).
+Creates a standard Part::Feature "Heatsink" with a ready heatsink solid.
+Parameters are controlled through the Task Panel (Face/Sketch Mode).
 
-Особенности:
-- для скетча: внешний контур = самая большая петля; остальные петли
-  используются как отверстия и вырезаются из основания и рёбер;
-- для выбранной грани: используем саму грань (она уже включает отверстия);
-- у созданного объекта назначается ViewProviderHeatsink, который по
-  двойному клику открывает то же GUI-окно (Heatsink from Face/Sketch).
+Notes:
+- For a sketch: the outer loop = the largest wire; other loops
+  are treated as holes and cut from the base and fins;
+- For a selected face: use the face itself (it already includes holes);
+- The created object gets ViewProviderHeatsink, which on
+  double click opens the same GUI window (Heatsink from Face/Sketch).
 """
 
 from __future__ import annotations
@@ -47,11 +47,11 @@ def _log_err(msg: str) -> None:
         print(prefix + msg)
 
 
-# ---------- выбор базовой грани и отверстий ---------------------------------
+# ---------- selecting base face and holes ---------------------------------
 
 
 def _largest_face_from_list(faces) -> Optional["Part.Face"]:
-    """Вернуть грань с максимальной площадью из списка faces."""
+    """Return the face with the maximum area from the faces list."""
     best = None
     best_area = 0.0
     for f in faces:
@@ -68,7 +68,7 @@ def _largest_face_from_list(faces) -> Optional["Part.Face"]:
 def _outer_and_hole_wires_from_shape(
     shape,
 ) -> Tuple[Optional["Part.Wire"], List["Part.Wire"]]:
-    """Определить внешний контур (наибольший wire) и остальные как отверстия."""
+    """Find the outer contour (largest wire) and treat the rest as holes."""
     if Part is None:
         return None, []
 
@@ -104,14 +104,14 @@ def _outer_and_hole_wires_from_shape(
 
 
 def _make_base_face_and_holes(shape):
-    """Сделать базовую грань и список отверстий.
+    """Build the base face and collect hole wires.
 
-    Возвращает кортеж (base_face, hole_wires):
+    Returns a tuple (base_face, hole_wires):
 
-    - при выборе грани: (face, []) — отверстия уже в самой грани;
-    - при выборе скетча:
-        * base_face строится по внешнему контуру (наибольший wire),
-        * список hole_wires возвращается отдельно для вырезания.
+    - for a selected face: (face, []) — the holes are already in the face;
+    - for a selected sketch:
+        * base_face is built from the outer contour (largest wire),
+        * hole_wires are returned separately for cutting.
     """
     if Part is None:
         _log_err("make_base_face_and_holes: Part is None")
@@ -119,7 +119,7 @@ def _make_base_face_and_holes(shape):
 
     _log("make_base_face_and_holes: start")
 
-    # 1) если shape уже содержит грани
+    # 1) if shape already contains faces
     try:
         faces = list(getattr(shape, "Faces", []))
         _log(f" make_base_face_and_holes: shape has {len(faces)} faces")
@@ -134,10 +134,10 @@ def _make_base_face_and_holes(shape):
                 " make_base_face_and_holes: using largest existing face, "
                 f"Area={best.Area:.3f}"
             )
-            # При выборе грани отверстия уже присутствуют в самой грани
+            # For a selected face the holes are already present
             return best, []
 
-    # 2) скетч / набор wires: outer = наибольший контур, остальные = отверстия
+    # 2) sketch / set of wires: outer = largest contour, others = holes
     outer_wire, hole_wires = _outer_and_hole_wires_from_shape(shape)
     if outer_wire is not None:
         try:
@@ -152,7 +152,7 @@ def _make_base_face_and_holes(shape):
             )
             return base_face, hole_wires
 
-    # 3) fallback — плоскость по bbox без отверстий
+    # 3) fallback — plane from bbox without holes
     bb = shape.BoundBox
     _log(
         " make_base_face_and_holes: falling back to plane from bbox "
@@ -177,13 +177,13 @@ def _make_base_face_and_holes(shape):
             return None, []
 
 
-# ---------- генерация рёбер/пинов -------------------------------------------
+# ---------- fin/pin generation -------------------------------------------
 
 
 def _create_straight_fins(
     base_face, base_thickness_mm: float, params: Dict[str, float]
 ):
-    """Сделать прямые рёбра вдоль X (по длине)."""
+    """Create straight fins along X (by length)."""
     bb = base_face.BoundBox
     length = bb.XLength
     width = bb.YLength
@@ -216,7 +216,7 @@ def _create_straight_fins(
 def _create_crosscut_pins(
     base_face, base_thickness_mm: float, params: Dict[str, float]
 ):
-    """Сделать решётку пинов (crosscut)."""
+    """Create a pin grid (crosscut)."""
     bb = base_face.BoundBox
     length = bb.XLength
     width = bb.YLength
@@ -259,7 +259,7 @@ def _create_crosscut_pins(
 
 
 def _create_pin_fin(base_face, base_thickness_mm: float, params: Dict[str, float]):
-    """Сделать квадратные пины по сетке (pin_fin)."""
+    """Create square pins on a grid (pin_fin)."""
     bb = base_face.BoundBox
     length = bb.XLength
     width = bb.YLength
@@ -302,7 +302,7 @@ def _create_pin_fin(base_face, base_thickness_mm: float, params: Dict[str, float
 def _create_fins_solid(
     heatsink_type: str, base_face, base_thickness_mm: float, params: Dict[str, float]
 ):
-    """Диспетчер создания рёбер / пинов."""
+    """Dispatcher for fin/pin creation."""
     _log(f" create_fins_solid: type={heatsink_type}")
     if heatsink_type == "straight_fins":
         return _create_straight_fins(base_face, base_thickness_mm, params)
@@ -314,11 +314,11 @@ def _create_fins_solid(
     return None, 0.0
 
 
-# ---------- ViewProvider для двойного клика ----------------------------------
+# ---------- ViewProvider for double-click ----------------------------------
 
 
 class ViewProviderHeatsink:
-    """View provider: по двойному клику открывает Face/Sketch Task Panel."""
+    """View provider: double-click opens the Face/Sketch Task Panel."""
 
     def __init__(self, vobj):
         self.Object = vobj.Object
@@ -330,7 +330,7 @@ class ViewProviderHeatsink:
             _log_err(" ViewProviderHeatsink.doubleClicked: Gui is None")
             return False
         try:
-            # делаем так, как если бы пользователь вручную выделил объект
+            # act as if the user selected the object manually
             Gui.Selection.clearSelection()
             Gui.Selection.addSelection(self.Object.Document, self.Object.Name)
         except Exception as exc:
@@ -340,7 +340,7 @@ class ViewProviderHeatsink:
             return False
 
         try:
-            # запускаем ту же команду, что и из тулбара
+            # run the same command as from the toolbar
             Gui.runCommand("HSD_HeatsinkFromFace")
             return True
         except Exception as exc:
@@ -349,7 +349,7 @@ class ViewProviderHeatsink:
             )
             return False
 
-    # Иконка (опционально). Если что-то пойдёт не так — вернём пустую строку.
+    # Icon (optional). If something goes wrong, return an empty string.
     def getIcon(self) -> str:  # pragma: no cover - GUI only
         try:
             import os
@@ -361,7 +361,7 @@ class ViewProviderHeatsink:
             return ""
 
 
-# ---------- основная фабрика -------------------------------------------------
+# ---------- main factory -------------------------------------------------
 
 
 def create_heatsink_feature(
@@ -369,14 +369,14 @@ def create_heatsink_feature(
     source_shape,
     base_thickness_mm: float,
     params: Dict[str, float],
-    material_key: Optional[str] = None,  # зарезервировано на будущее
+    material_key: Optional[str] = None,  # reserved for future use
     doc=None,
 ):
-    """Создать обычный Part::Feature с формой радиатора на основе shape.
+    """Create a standard Part::Feature with heatsink geometry based on shape.
 
-    - Внешний контур: наибольший face / wire.
-    - Внутренние контуры (для скетча): вычитаются из основания и рёбер.
-    - Установить ViewProviderHeatsink для обработки двойного клика.
+    - Outer contour: largest face / wire.
+    - Inner contours (for a sketch): cut out from the base and fins.
+    - Assign ViewProviderHeatsink to handle double-click.
     """
     if App is None or Part is None:  # pragma: no cover
         raise RuntimeError("FreeCAD with Part workbench is required")
@@ -411,14 +411,14 @@ def create_heatsink_feature(
 
     normal = App.Vector(0, 0, 1)
 
-    # Основание (пока без отверстий)
+    # Base (without holes for now)
     base_solid = base_face.extrude(normal * base_thickness_mm)
     _log(
         " create_heatsink_feature: base_solid built; "
         f"Volume={getattr(base_solid, 'Volume', 'N/A')}"
     )
 
-    # Вырезаем отверстия в основании (только для скетча: hole_wires != [])
+    # Cut holes in the base (sketch only: hole_wires != [])
     if hole_wires:
         for w in hole_wires:
             try:
@@ -432,7 +432,7 @@ def create_heatsink_feature(
             f"Volume={getattr(base_solid, 'Volume', 'N/A')}"
         )
 
-    # Если просто плита
+    # Solid plate only
     if heatsink_type == "solid_plate":
         result_solid = base_solid
         _log(" create_heatsink_feature: type=solid_plate, using base_solid only")
@@ -469,8 +469,8 @@ def create_heatsink_feature(
                 _log_err(f" create_heatsink_feature: fins_solid.common failed: {exc}")
                 fins_trimmed = fins_solid
 
-            # Вырезаем отверстия и из рёбер (по тем же hole_wires,
-            # но экструдируем на полную высоту)
+            # Cut holes from fins as well (using the same hole_wires,
+            # but extruded to the full height)
             if hole_wires:
                 for w in hole_wires:
                     try:
@@ -497,17 +497,17 @@ def create_heatsink_feature(
                 _log_err(f" create_heatsink_feature: Part.Compound failed: {exc}")
                 result_solid = base_solid
 
-    # Создаём обычный Part::Feature
+    # Create a regular Part::Feature
     obj = doc.addObject("Part::Feature", "Heatsink")
     obj.Shape = result_solid
 
-    # Небольшая справочная инфа в свойствах
+    # Store small reference info in properties
     try:
         obj.addProperty(
             "App::PropertyString",
             "HeatsinkType",
             "Heatsink",
-            "Тип радиатора (для информации)",
+            "Heatsink type (for reference)",
         )
         obj.HeatsinkType = heatsink_type
 
@@ -515,7 +515,7 @@ def create_heatsink_feature(
             "App::PropertyFloat",
             "BaseThickness",
             "Heatsink",
-            "Толщина основания (мм, справочно)",
+            "Base thickness (mm, reference)",
         )
         obj.BaseThickness = float(base_thickness_mm)
 
@@ -526,7 +526,7 @@ def create_heatsink_feature(
                     "App::PropertyFloat",
                     pname,
                     "Heatsink",
-                    f"Параметр {k} (мм, справочно)",
+                    f"Parameter {k} (mm, reference)",
                 )
                 setattr(obj, pname, float(v))
             except Exception:
@@ -534,7 +534,7 @@ def create_heatsink_feature(
     except Exception as exc:
         _log_err(f" create_heatsink_feature: adding properties failed: {exc}")
 
-    # Настройки отображения
+    # Display settings
     try:
         if hasattr(obj, "ViewObject"):
             vo = obj.ViewObject
@@ -550,7 +550,7 @@ def create_heatsink_feature(
     except Exception as exc:
         _log_err(f" create_heatsink_feature: setting ViewObject failed: {exc}")
 
-    # Назначаем view provider, чтобы по двойному клику открывать Task Panel
+    # Assign view provider so double-click opens the Task Panel
     try:
         if Gui is not None and hasattr(obj, "ViewObject"):
             ViewProviderHeatsink(obj.ViewObject)
