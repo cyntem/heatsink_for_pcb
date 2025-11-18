@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package format="1">
+  <name>HeatsinkDesigner</name>
+  <version>0.1.0</version>
+  <description>FreeCAD workbench for generating CNC-friendly heatsinks and estimating heat dissipation.</description>
+  <maintainer email="">HeatsinkDesigner Maintainers</maintainer>
+  <license>LicenseRef-UNSPECIFIED</license>
+  <url type="repository">https://github.com/</url>
+  <url type="bugtracker">https://github.com//issues</url>
+  <url type="documentation">README.md</url>
+  <icon>HeatsinkDesigner/icons/heatsink.svg</icon>
+  <content>
+    <workbench>HeatsinkDesigner</workbench>
+  </content>
+</package>

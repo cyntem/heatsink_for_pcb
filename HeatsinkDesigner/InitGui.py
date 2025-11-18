@@ -2,8 +2,24 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import FreeCADGui as Gui  # FreeCAD GUI API
+
+
+def _module_dir() -> Path:
+    """Return the folder containing this module.
+
+    Prefers ``__file__`` (normal runtime) and falls back to ``__spec__`` so
+    tests can import the module without a filesystem-backed ``__file__``.
+    """
+
+    if "__file__" in globals():
+        return Path(__file__).parent
+    spec = globals().get("__spec__")
+    if spec and getattr(spec, "origin", None):
+        return Path(spec.origin).parent
+    return Path(os.getcwd())
 
 
 class HeatsinkDesignerWorkbench(Gui.Workbench):
@@ -16,12 +32,9 @@ class HeatsinkDesignerWorkbench(Gui.Workbench):
         super().__init__()
 
         # Reliable icon path resolution
-        try:
-            base_dir = os.path.dirname(__file__)
-        except NameError:
-            base_dir = os.getcwd()
+        base_dir = _module_dir()
 
-        self.Icon = os.path.join(base_dir, "icons", "heatsink.svg")
+        self.Icon = str(base_dir / "icons" / "heatsink.svg")
 
         # Commands will be loaded in Initialize()
         self._commands = {}

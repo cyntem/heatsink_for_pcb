@@ -35,7 +35,14 @@ The **HeatsinkDesignerWB** extension adds a FreeCAD tool for parametrically gene
 
 ## Installation and launch in FreeCAD
 
-1. Copy the `HeatsinkDesigner` folder into the `Mod` directory of your FreeCAD installation:
+### Via Addon Manager (recommended)
+
+1. In FreeCAD open `Tools → Addon Manager`, search for **HeatsinkDesigner**, and click Install.
+2. Restart FreeCAD if prompted. The workbench registers automatically through the top-level `Init.py`/`InitGui.py` wrappers.
+
+### Manual install
+
+1. Copy the repository folder (containing `Init.py`, `InitGui.py`, and the `HeatsinkDesigner` package) into the `Mod` directory of your FreeCAD installation:
    - Classic installs: `~/.local/share/FreeCAD/Mod` (Linux), `%APPDATA%/FreeCAD/Mod` (Windows), `~/Library/Preferences/FreeCAD/Mod` (macOS);
    - Snap package (FreeCAD 1.0.2): `~/snap/freecad/common/Mod`.
 2. Restart FreeCAD. The **HeatsinkDesigner** Workbench appears with two commands: generation from a face/sketch and generation from dimensions.
