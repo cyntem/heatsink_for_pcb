@@ -37,7 +37,7 @@ def _load_qt_widgets():
 
 
 def _build_placeholder_panel(title: str, description: str):
-    """Простой QWidget-заглушка на случай, если не удалось загрузить TaskPanel."""
+    """Simple QWidget placeholder when TaskPanel cannot be loaded."""
 
     QtWidgets = _load_qt_widgets()
 
@@ -57,11 +57,11 @@ def _build_placeholder_panel(title: str, description: str):
 
 
 def _import_taskpanel(module_name: str, class_name: str):
-    """Попробовать загрузить TaskPanel класс из пакета или локального модуля.
+    """Try to load a TaskPanel class from the package or local module.
 
-    1) Пытаемся импортировать HeatsinkDesigner.<module_name>.
-    2) Если не получилось — просто <module_name>.
-    При ошибке пишем сообщение в консоль FreeCAD и возвращаем None.
+    1) Try importing HeatsinkDesigner.<module_name>.
+    2) If that fails — just <module_name>.
+    On error print a message to the FreeCAD console and return None.
     """
     last_exc: Exception | None = None
     try:
@@ -87,7 +87,7 @@ def _import_taskpanel(module_name: str, class_name: str):
 
 
 class _BaseCommand:
-    """Базовый класс для GUI-команд."""
+    """Base class for GUI commands."""
 
     def __init__(self, name: str, tooltip: str) -> None:
         self._name = name
@@ -105,12 +105,12 @@ class _BaseCommand:
 
 
 class HeatsinkFromFaceCommand(_BaseCommand):
-    """Команда для режима по поверхности/эскизу."""
+    """Command for face/sketch mode."""
 
     def __init__(self) -> None:
         super().__init__(
             name="Heatsink from Face/Sketch",
-            tooltip="Построить радиатор на выбранной плоской грани или эскизе",
+            tooltip="Build a heatsink on the selected planar face or sketch",
         )
 
     def Activated(self):  # noqa: N802
@@ -119,9 +119,9 @@ class HeatsinkFromFaceCommand(_BaseCommand):
 
         if PanelClass is None:
             panel = _build_placeholder_panel(
-                "Heatsink по поверхности/эскизу",
-                "Не удалось загрузить GUI (FaceModeTaskPanel).\n"
-                "Проверьте файлы gui_face_mode.py и установку HeatsinkDesigner.",
+                "Heatsink from face/sketch",
+                "Failed to load GUI (FaceModeTaskPanel).\n"
+                "Check gui_face_mode.py and the HeatsinkDesigner installation.",
             )
         else:
             panel = PanelClass()
@@ -130,12 +130,12 @@ class HeatsinkFromFaceCommand(_BaseCommand):
 
 
 class HeatsinkByDimensionsCommand(_BaseCommand):
-    """Команда для режима по габаритам."""
+    """Command for dimension mode."""
 
     def __init__(self) -> None:
         super().__init__(
             name="Heatsink by Dimensions",
-            tooltip="Подбор радиатора по заданным габаритам без предварительного выбора",
+            tooltip="Pick a heatsink for given dimensions without preselection",
         )
 
     def Activated(self):  # noqa: N802
@@ -144,9 +144,9 @@ class HeatsinkByDimensionsCommand(_BaseCommand):
 
         if PanelClass is None:
             panel = _build_placeholder_panel(
-                "Heatsink по габаритам",
-                "Не удалось загрузить GUI (DimensionModeTaskPanel).\n"
-                "Проверьте файлы gui_dim_mode.py и установку HeatsinkDesigner.",
+                "Heatsink by dimensions",
+                "Failed to load GUI (DimensionModeTaskPanel).\n"
+                "Check gui_dim_mode.py and the HeatsinkDesigner installation.",
             )
         else:
             panel = PanelClass()

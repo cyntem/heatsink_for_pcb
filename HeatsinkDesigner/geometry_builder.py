@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
-# Аналитическая геометрия (для тепловых расчётов)
+# Analytical geometry (for thermal calculations)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -232,7 +232,7 @@ def build_geometry(
 ) -> GeometryDetails:
     """Dispatch geometry creation based on heatsink type key.
 
-    params может содержать ключ "material_conductivity_w_mk".
+    params may include key "material_conductivity_w_mk".
     """
     params = dict(params) if params is not None else {}
     base = BaseDimensions(
@@ -275,19 +275,19 @@ def build_geometry(
 
 
 # ---------------------------------------------------------------------------
-# 3D-геометрия в FreeCAD (произвольный контур)
+# 3D geometry in FreeCAD (arbitrary outline)
 # ---------------------------------------------------------------------------
 
 def _profile_to_face(profile_shape, base: BaseDimensions):
-    """Преобразовать выбранный профиль (face/sketch) в Part.Face.
+    """Convert the selected profile (face/sketch) to Part.Face.
 
-    При наличии отверстий стараемся сохранить их (используем Wires).
-    При ошибке возвращаем прямоугольную плоскость L×W.
+    Preserve holes when possible (use Wires).
+    On error return a rectangular L×W face.
     """
     try:
         import Part  # type: ignore
     except Exception as exc:  # pragma: no cover
-        raise RuntimeError("Модуль Part недоступен") from exc
+        raise RuntimeError("Part module is unavailable") from exc
 
     if profile_shape is None:
         return Part.makePlane(base.length_mm, base.width_mm)
@@ -296,28 +296,28 @@ def _profile_to_face(profile_shape, base: BaseDimensions):
     if hasattr(shape, "Shape"):
         shape = shape.Shape  # type: ignore[assignment]
 
-    # Если уже есть лица – берём первое (обычно одно с отверстиями)
+    # If faces already exist – use the first (often with holes)
     try:
         if hasattr(shape, "Faces") and shape.Faces:  # type: ignore[attr-defined]
             return shape.Faces[0]  # type: ignore[index]
     except Exception:
         pass
 
-    # Если есть набор проводов (outer + inner) – делаем лицо с отверстиями
+    # If there is a set of wires (outer + inner) – build face with holes
     try:
         if hasattr(shape, "Wires") and shape.Wires:  # type: ignore[attr-defined]
             return Part.Face(shape.Wires)  # type: ignore[arg-type]
     except Exception:
         pass
 
-    # Fallback: только внешний контур
+    # Fallback: outer contour only
     try:
         if hasattr(shape, "OuterWire"):  # type: ignore[attr-defined]
             return Part.Face(shape.OuterWire)  # type: ignore[arg-type]
     except Exception:
         pass
 
-    # Последний шанс
+    # Last resort
     try:
         return Part.Face(shape)  # type: ignore[arg-type]
     except Exception:
@@ -333,9 +333,9 @@ def _create_fins_solid(
     bb,
     z_base: float,
 ):
-    """Создать объединённый solid всех рёбер/пинов.
+    """Create a combined solid of all fins/pins.
 
-    z_base – абсолютная Z-координата верха основания, откуда начинают рёбра.
+    z_base – absolute Z coordinate of the base top where fins start.
     """
     x0 = bb.XMin
     y0 = bb.YMin
@@ -419,18 +419,18 @@ def create_heatsink_solid(
     doc=None,
     profile_shape=None,
 ):
-    """Создать 3D-модель радиатора в FreeCAD.
+    """Create a 3D heatsink model in FreeCAD.
 
-    Рёбра всегда начинаются строго от верха основания (не заходят в него).
-    При проблемах с булевыми операциями по контуру с отверстиями
-    есть запасной режим без обрезки по контуру.
+    Fins always start exactly at the top of the base (do not sink into it).
+    If boolean operations fail on outlines with holes
+    there is a fallback mode without trimming by contour.
     """
     try:
         import FreeCAD as App  # type: ignore
         import Part  # type: ignore
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
-            "Создание 3D-геометрии возможно только внутри FreeCAD"
+            "3D geometry creation is only available inside FreeCAD"
         ) from exc
 
     if doc is None:
@@ -438,9 +438,9 @@ def create_heatsink_solid(
 
     base_face = _profile_to_face(profile_shape, base)
     bb_face = base_face.BoundBox
-    normal = App.Vector(0, 0, 1)  # пока жёстко вверх
+    normal = App.Vector(0, 0, 1)  # fixed upward normal for now
 
-    # Основание
+    # Base
     base_solid = base_face.extrude(normal * base.base_thickness_mm)
 
     if heatsink_type == "solid_plate":
@@ -450,7 +450,7 @@ def create_heatsink_solid(
         doc.recompute()
         return obj
 
-    # Рёбра стартуют от верха основания
+    # Fins start at the top of the base
     z_top_base = bb_face.ZMax + base.base_thickness_mm
 
     fins_solid, fin_height_mm = _create_fins_solid(
@@ -472,12 +472,12 @@ def create_heatsink_solid(
     total_height = base.base_thickness_mm + fin_height_mm
     contour_prism = base_face.extrude(normal * total_height)
 
-    # Попытка обрезать рёбра по реальному контуру (с отверстиями)
+    # Attempt to trim fins to the real outline (with holes)
     try:
         fins_trimmed = fins_solid.common(contour_prism)
         result_solid = base_solid.fuse(fins_trimmed)
     except Exception:
-        # Fallback: без обрезки, просто рёбра по bounding box
+        # Fallback: no trimming, fins via bounding box
         result_solid = base_solid.fuse(fins_solid)
 
     name_prefix = {

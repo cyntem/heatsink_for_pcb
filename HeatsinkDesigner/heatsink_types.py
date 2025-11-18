@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-# ---- устойчивый импорт cnc_defaults ----------------------------------------
+# ---- robust cnc_defaults import ----------------------------------------
 try:
     from HeatsinkDesigner import cnc_defaults
 except ImportError:
@@ -43,7 +43,7 @@ SUPPORTED_TYPES: Dict[str, HeatsinkType] = {
             ParameterSpec(
                 name="base_thickness_mm",
                 unit="mm",
-                description="Толщина плиты",
+                description="Plate thickness",
                 min_value=0.1,
             )
         ],
@@ -55,25 +55,25 @@ SUPPORTED_TYPES: Dict[str, HeatsinkType] = {
             ParameterSpec(
                 name="fin_thickness_mm",
                 unit="mm",
-                description="Толщина ребра",
+                description="Fin thickness",
                 min_value=cnc_defaults.MIN_FIN_THICKNESS_MM,
             ),
             ParameterSpec(
                 name="fin_gap_mm",
                 unit="mm",
-                description="Зазор между ребрами",
+                description="Gap between fins",
                 min_value=cnc_defaults.MIN_FIN_GAP_MM,
             ),
             ParameterSpec(
                 name="fin_height_mm",
                 unit="mm",
-                description="Высота ребра",
+                description="Fin height",
                 min_value=1.0,
             ),
             ParameterSpec(
                 name="base_thickness_mm",
                 unit="mm",
-                description="Толщина основания",
+                description="Base thickness",
                 min_value=1.0,
             ),
         ],
@@ -85,25 +85,25 @@ SUPPORTED_TYPES: Dict[str, HeatsinkType] = {
             ParameterSpec(
                 name="groove_width_mm",
                 unit="mm",
-                description="Ширина канавки",
+                description="Groove width",
                 min_value=cnc_defaults.MIN_FIN_GAP_MM,
             ),
             ParameterSpec(
                 name="pin_size_mm",
                 unit="mm",
-                description="Сторона квадратного пина",
+                description="Square pin side",
                 min_value=cnc_defaults.MIN_FIN_THICKNESS_MM,
             ),
             ParameterSpec(
                 name="pin_height_mm",
                 unit="mm",
-                description="Высота пинов",
+                description="Pin height",
                 min_value=1.0,
             ),
             ParameterSpec(
                 name="base_thickness_mm",
                 unit="mm",
-                description="Толщина основания",
+                description="Base thickness",
                 min_value=1.0,
             ),
         ],
@@ -115,25 +115,25 @@ SUPPORTED_TYPES: Dict[str, HeatsinkType] = {
             ParameterSpec(
                 name="pin_size_mm",
                 unit="mm",
-                description="Сечение квадратного пина",
+                description="Square pin cross-section",
                 min_value=cnc_defaults.MIN_FIN_THICKNESS_MM,
             ),
             ParameterSpec(
                 name="pitch_mm",
                 unit="mm",
-                description="Шаг между пинами",
+                description="Pitch between pins",
                 min_value=cnc_defaults.MIN_FIN_GAP_MM,
             ),
             ParameterSpec(
                 name="pin_height_mm",
                 unit="mm",
-                description="Высота пинов",
+                description="Pin height",
                 min_value=1.0,
             ),
             ParameterSpec(
                 name="base_thickness_mm",
                 unit="mm",
-                description="Толщина основания",
+                description="Base thickness",
                 min_value=1.0,
             ),
         ],
