@@ -1,12 +1,14 @@
 """Simple solid builder for heatsinks based on a selected face/sketch shape.
 
-Текущая версия создаёт обычный Part::Feature "Heatsink" с готовой
-формой радиатора. Параметры управляются через Task Panel.
+Создаёт обычный Part::Feature "Heatsink" с готовой формой радиатора.
+Параметры управляются через Task Panel (Face/Sketch Mode).
 
 Особенности:
 - для скетча: внешний контур = самая большая петля; остальные петли
   используются как отверстия и вырезаются из основания и рёбер;
-- для выбранной грани: используем саму грань (она уже включает отверстия).
+- для выбранной грани: используем саму грань (она уже включает отверстия);
+- у созданного объекта назначается ViewProviderHeatsink, который по
+  двойному клику открывает то же GUI-окно (Heatsink from Face/Sketch).
 """
 
 from __future__ import annotations
@@ -24,6 +26,9 @@ try:
     import FreeCADGui as Gui  # type: ignore
 except Exception:  # pragma: no cover
     Gui = None  # type: ignore
+
+
+# ---------------------------------------------------------------------------
 
 
 def _log(msg: str) -> None:
@@ -60,7 +65,9 @@ def _largest_face_from_list(faces) -> Optional["Part.Face"]:
     return best
 
 
-def _outer_and_hole_wires_from_shape(shape) -> Tuple[Optional["Part.Wire"], List["Part.Wire"]]:
+def _outer_and_hole_wires_from_shape(
+    shape,
+) -> Tuple[Optional["Part.Wire"], List["Part.Wire"]]:
     """Определить внешний контур (наибольший wire) и остальные как отверстия."""
     if Part is None:
         return None, []
@@ -99,12 +106,12 @@ def _outer_and_hole_wires_from_shape(shape) -> Tuple[Optional["Part.Wire"], List
 def _make_base_face_and_holes(shape):
     """Сделать базовую грань и список отверстий.
 
-    Возвращает кортеж (base_face, hole_faces_or_wires):
+    Возвращает кортеж (base_face, hole_wires):
 
     - при выборе грани: (face, []) — отверстия уже в самой грани;
     - при выборе скетча:
         * base_face строится по внешнему контуру (наибольший wire),
-        * список hole_wires возвращается отдельно.
+        * список hole_wires возвращается отдельно для вырезания.
     """
     if Part is None:
         _log_err("make_base_face_and_holes: Part is None")
@@ -173,7 +180,9 @@ def _make_base_face_and_holes(shape):
 # ---------- генерация рёбер/пинов -------------------------------------------
 
 
-def _create_straight_fins(base_face, base_thickness_mm: float, params: Dict[str, float]):
+def _create_straight_fins(
+    base_face, base_thickness_mm: float, params: Dict[str, float]
+):
     """Сделать прямые рёбра вдоль X (по длине)."""
     bb = base_face.BoundBox
     length = bb.XLength
@@ -204,7 +213,9 @@ def _create_straight_fins(base_face, base_thickness_mm: float, params: Dict[str,
     return Part.Compound(fins), fin_h
 
 
-def _create_crosscut_pins(base_face, base_thickness_mm: float, params: Dict[str, float]):
+def _create_crosscut_pins(
+    base_face, base_thickness_mm: float, params: Dict[str, float]
+):
     """Сделать решётку пинов (crosscut)."""
     bb = base_face.BoundBox
     length = bb.XLength
@@ -303,6 +314,53 @@ def _create_fins_solid(
     return None, 0.0
 
 
+# ---------- ViewProvider для двойного клика ----------------------------------
+
+
+class ViewProviderHeatsink:
+    """View provider: по двойному клику открывает Face/Sketch Task Panel."""
+
+    def __init__(self, vobj):
+        self.Object = vobj.Object
+        vobj.Proxy = self
+
+    def doubleClicked(self, vobj) -> bool:  # pragma: no cover - GUI only
+        _log("ViewProviderHeatsink.doubleClicked")
+        if Gui is None:
+            _log_err(" ViewProviderHeatsink.doubleClicked: Gui is None")
+            return False
+        try:
+            # делаем так, как если бы пользователь вручную выделил объект
+            Gui.Selection.clearSelection()
+            Gui.Selection.addSelection(self.Object.Document, self.Object.Name)
+        except Exception as exc:
+            _log_err(
+                f" ViewProviderHeatsink.doubleClicked: selection failed: {exc}"
+            )
+            return False
+
+        try:
+            # запускаем ту же команду, что и из тулбара
+            Gui.runCommand("HSD_HeatsinkFromFace")
+            return True
+        except Exception as exc:
+            _log_err(
+                f" ViewProviderHeatsink.doubleClicked: runCommand failed: {exc}"
+            )
+            return False
+
+    # Иконка (опционально). Если что-то пойдёт не так — вернём пустую строку.
+    def getIcon(self) -> str:  # pragma: no cover - GUI only
+        try:
+            import os
+            import HeatsinkDesigner  # type: ignore
+
+            base_dir = os.path.dirname(HeatsinkDesigner.__file__)
+            return os.path.join(base_dir, "icons", "heatsink.svg")
+        except Exception:
+            return ""
+
+
 # ---------- основная фабрика -------------------------------------------------
 
 
@@ -318,6 +376,7 @@ def create_heatsink_feature(
 
     - Внешний контур: наибольший face / wire.
     - Внутренние контуры (для скетча): вычитаются из основания и рёбер.
+    - Установить ViewProviderHeatsink для обработки двойного клика.
     """
     if App is None or Part is None:  # pragma: no cover
         raise RuntimeError("FreeCAD with Part workbench is required")
@@ -419,7 +478,9 @@ def create_heatsink_feature(
                         hole_prism_full = hole_face.extrude(normal * total_height)
                         fins_trimmed = fins_trimmed.cut(hole_prism_full)
                     except Exception as exc:
-                        _log_err(f" create_heatsink_feature: fins hole cut failed: {exc}")
+                        _log_err(
+                            f" create_heatsink_feature: fins hole cut failed: {exc}"
+                        )
                 _log(
                     " create_heatsink_feature: fins_trimmed after holes; "
                     f"Volume={getattr(fins_trimmed, 'Volume', 'N/A')}"
@@ -488,6 +549,13 @@ def create_heatsink_feature(
                 pass
     except Exception as exc:
         _log_err(f" create_heatsink_feature: setting ViewObject failed: {exc}")
+
+    # Назначаем view provider, чтобы по двойному клику открывать Task Panel
+    try:
+        if Gui is not None and hasattr(obj, "ViewObject"):
+            ViewProviderHeatsink(obj.ViewObject)
+    except Exception as exc:
+        _log_err(f" create_heatsink_feature: ViewProviderHeatsink failed: {exc}")
 
     doc.recompute()
     _log(
