@@ -59,8 +59,9 @@ def _build_placeholder_panel(title: str, description: str):
 def _import_taskpanel(module_name: str, class_name: str):
     """Try to load a TaskPanel class from the package or local module.
 
-    1) Try importing HeatsinkDesigner.<module_name>.
-    2) If that fails — just <module_name>.
+    1) Try importing .<module_name> relative to this package.
+    2) Try importing HeatsinkDesigner.<module_name>.
+    3) If that fails — just <module_name>.
     On error print a message to the FreeCAD console and return None.
     """
     last_exc: Exception | None = None
@@ -69,9 +70,15 @@ def _import_taskpanel(module_name: str, class_name: str):
     except Exception:
         App = None  # type: ignore[assignment]
 
-    for modname in (f"HeatsinkDesigner.{module_name}", module_name):
+    search_order = (
+        (f".{module_name}", __package__),
+        (f"HeatsinkDesigner.{module_name}", None),
+        (module_name, None),
+    )
+
+    for modname, pkg in search_order:
         try:
-            module = import_module(modname)
+            module = import_module(modname, pkg) if pkg else import_module(modname)
             cls = getattr(module, class_name)
             return cls
         except Exception as exc:
