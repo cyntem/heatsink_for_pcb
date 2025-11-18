@@ -4,25 +4,47 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, List
 
+# ---------- логгер -----------------------------------------------------------
+
+try:
+    import FreeCAD as App  # type: ignore
+except Exception:  # pragma: no cover
+    App = None  # type: ignore
+
+
+def _log(msg: str) -> None:
+    prefix = "[HSD] "
+    if App is not None:
+        App.Console.PrintMessage(prefix + msg + "\n")
+    else:  # pragma: no cover
+        print(prefix + msg)
+
+
+def _log_err(msg: str) -> None:
+    prefix = "[HSD-ERR] "
+    if App is not None:
+        App.Console.PrintError(prefix + msg + "\n")
+    else:  # pragma: no cover
+        print(prefix + msg)
+
+
 # ---------- Импорты модулей воркбенча ---------------------------------------
 try:
     from HeatsinkDesigner.geometry_builder import (
         BaseDimensions,
         GeometryDetails,
         build_geometry,
-        create_heatsink_solid,
     )
-except ImportError:  # pragma: no cover
+except Exception:  # pragma: no cover
     from geometry_builder import (  # type: ignore[no-redef]
         BaseDimensions,
         GeometryDetails,
         build_geometry,
-        create_heatsink_solid,
     )
 
 try:
     from HeatsinkDesigner.heatsink_types import SUPPORTED_TYPES
-except ImportError:  # pragma: no cover
+except Exception:  # pragma: no cover
     from heatsink_types import SUPPORTED_TYPES  # type: ignore[no-redef]
 
 try:
@@ -32,7 +54,7 @@ try:
         MATERIALS,
         DEFAULT_MATERIAL_KEY,
     )
-except ImportError:  # pragma: no cover
+except Exception:  # pragma: no cover
     from thermal_model import (  # type: ignore[no-redef]
         Environment,
         estimate_heat_dissipation,
@@ -40,10 +62,15 @@ except ImportError:  # pragma: no cover
         DEFAULT_MATERIAL_KEY,
     )
 
+try:
+    from HeatsinkDesigner.heatsink_feature import create_heatsink_feature
+except Exception:  # pragma: no cover
+    from heatsink_feature import create_heatsink_feature  # type: ignore[no-redef]
+
 
 # какой параметр считаем "высотой" для каждого типа
 HEIGHT_PARAM_MAP: Dict[str, str] = {
-    "solid_plate": "base_thickness_mm",  # для пластины "высота" = толщина
+    "solid_plate": "base_thickness_mm",
     "straight_fins": "fin_height_mm",
     "crosscut": "pin_height_mm",
     "pin_fin": "pin_height_mm",
@@ -57,8 +84,7 @@ class FaceSelection:
     length_mm: float
     width_mm: float
     area_mm2: float
-    shape: object
-    normal: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    shape: object  # TopoShape
 
     def base_dimensions(self, base_thickness_mm: float) -> BaseDimensions:
         return BaseDimensions(
@@ -101,13 +127,17 @@ class FaceSketchController:
         merged_params = dict(params)
         merged_params["material_conductivity_w_mk"] = material_k
 
+        _log(
+            f"prepare_geometry: type={heatsink_type}, base_dims=({base_dims.length_mm}, "
+            f"{base_dims.width_mm}, {base_dims.base_thickness_mm}), params={merged_params}"
+        )
+
         details = build_geometry(
             heatsink_type,
             (base_dims.length_mm, base_dims.width_mm, base_dims.base_thickness_mm),
             merged_params,
         )
 
-        # Масштабирование по реальной площади face/sketch относительно bounding-box
         if sel.area_mm2 > 0:
             bbox_area_mm2 = sel.length_mm * sel.width_mm
             if bbox_area_mm2 > 0:
@@ -118,6 +148,7 @@ class FaceSketchController:
                     f"Thermal area scaled by factor {scale:.2f} "
                     f"to match real face/sketch area"
                 )
+                _log(f" prepare_geometry: scaled areas by factor {scale:.3f}")
 
         return details
 
@@ -130,6 +161,7 @@ def _load_qt_widgets():
     for name in ("PySide6", "PySide2"):
         try:
             module = __import__(name + ".QtWidgets", fromlist=["QtWidgets"])
+            _log(f"Qt loaded from {name}")
             return module
         except ImportError:
             continue
@@ -145,10 +177,11 @@ class FaceModeTaskPanel:
         self.controller = FaceSketchController()
 
         self._height_param_name: Optional[str] = None
-        self._current_type_key: str = "straight_fins"  # по умолчанию рёбра
+        self._current_type_key: str = "straight_fins"  # default
 
         self.form = QtWidgets.QWidget()
         self._build_ui()
+        _log("FaceModeTaskPanel initialized")
 
     # ------------------------------------------------------------------ UI ---
     def _build_ui(self) -> None:
@@ -163,7 +196,7 @@ class FaceModeTaskPanel:
         hint = QtWidgets.QLabel(
             "Выберите плоскую грань или эскиз в 3D-виде.\n"
             "Параметры и результат пересчитываются автоматически.\n"
-            "Кнопка генерирует 3D-модель в документе (по контуру)."
+            "Кнопка генерирует параметрический объект радиатора по контуру."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -203,7 +236,6 @@ class FaceModeTaskPanel:
         for key in self._material_keys:
             mat = MATERIALS[key]
             self.material_combo.addItem(mat.label, userData=key)
-        # по умолчанию – Al 6061
         if DEFAULT_MATERIAL_KEY in self._material_keys:
             idx = self._material_keys.index(DEFAULT_MATERIAL_KEY)
             self.material_combo.setCurrentIndex(idx)
@@ -228,7 +260,7 @@ class FaceModeTaskPanel:
         self.height_spin = QtWidgets.QDoubleSpinBox()
         self.height_spin.setRange(1.0, 1e6)
         self.height_spin.setDecimals(2)
-        self.height_spin.setSingleStep(0.1)  # шаг 0.1 мм
+        self.height_spin.setSingleStep(0.1)
         self.height_spin.setValue(20.0)
         self.height_spin.setSuffix(" мм")
         self.therm_layout.addRow(self.height_label, self.height_spin)
@@ -242,7 +274,7 @@ class FaceModeTaskPanel:
 
         # Кнопки
         btn_row = QtWidgets.QHBoxLayout()
-        self.btn_generate = QtWidgets.QPushButton("Сгенерировать 3D-модель")
+        self.btn_generate = QtWidgets.QPushButton("Сгенерировать 3D-модель (параметрическую)")
         self.btn_chart = QtWidgets.QPushButton("График Q_max(h) (текущий тип)")
 
         self.btn_generate.clicked.connect(self._on_generate_clicked)
@@ -262,7 +294,7 @@ class FaceModeTaskPanel:
         self.analysis_mode_combo.currentIndexChanged.connect(self._on_analysis_mode_changed)
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
 
-        # Установим тип по умолчанию: Straight milled fins
+        # Тип по умолчанию – Straight milled fins
         if "straight_fins" in self._type_keys:
             idx = self._type_keys.index("straight_fins")
             self.type_combo.setCurrentIndex(idx)
@@ -273,6 +305,7 @@ class FaceModeTaskPanel:
             )
 
         self._on_type_changed(self.type_combo.currentIndex())
+        _log("FaceModeTaskPanel UI built")
 
     # ----------------------------------------------------------- helpers -----
     def _current_material(self):
@@ -284,16 +317,21 @@ class FaceModeTaskPanel:
             mat = MATERIALS[DEFAULT_MATERIAL_KEY]
         return mat
 
+    def _current_material_key(self) -> str:
+        key = self.material_combo.currentData()
+        if not key:
+            key = DEFAULT_MATERIAL_KEY
+        return str(key)
+
     def _on_analysis_mode_changed(self, index: int) -> None:
         mode = self.analysis_mode_combo.currentData()
+        _log(f"_on_analysis_mode_changed: mode={mode}")
         if mode == "h_to_q":
-            # считаем P_load по высоте → показываем высоту
             self.power_label.setVisible(False)
             self.power_spin.setVisible(False)
             self.height_label.setVisible(True)
             self.height_spin.setVisible(True)
         else:
-            # считаем высоту по P_load → показываем P_load
             self.power_label.setVisible(True)
             self.power_spin.setVisible(True)
             self.height_label.setVisible(False)
@@ -306,12 +344,12 @@ class FaceModeTaskPanel:
         if not key:
             key = self._type_keys[0]
         self._current_type_key = key
+        _log(f"_on_type_changed: type={key}")
 
         hs_type = SUPPORTED_TYPES[key]
         defaults = hs_type.default_parameters()
         self._height_param_name = HEIGHT_PARAM_MAP.get(key)
 
-        # очищаем форму
         while self.params_layout.rowCount():
             self.params_layout.removeRow(0)
         self._param_widgets.clear()
@@ -319,7 +357,6 @@ class FaceModeTaskPanel:
         height_default = 20.0
         height_min = 1.0
 
-        # создаём spinbox'ы для всех параметров, кроме высоты
         for param in hs_type.parameters:
             if param.name == self._height_param_name:
                 height_default = defaults.get(param.name, max(param.min_value, 1.0))
@@ -328,19 +365,26 @@ class FaceModeTaskPanel:
 
             spin = QtWidgets.QDoubleSpinBox()
             spin.setDecimals(2)
-            spin.setSingleStep(0.1)  # шаг 0.1 мм
+            spin.setSingleStep(0.1)
             spin.setRange(param.min_value, 1e6)
             spin.setValue(defaults.get(param.name, max(param.min_value, 0.0)))
             spin.setSuffix(" " + param.unit)
             self.params_layout.addRow(param.description + ":", spin)
             self._param_widgets[param.name] = spin
             spin.valueChanged.connect(self._update_result_label)
+            _log(
+                f" _on_type_changed: param widget {param.name} "
+                f"default={spin.value()}"
+            )
 
-        # высота
         self.height_spin.blockSignals(True)
         self.height_spin.setRange(height_min, 1e6)
         self.height_spin.setValue(height_default)
         self.height_spin.blockSignals(False)
+        _log(
+            f" _on_type_changed: height_param={self._height_param_name}, "
+            f"height_default={height_default}"
+        )
 
         self._on_analysis_mode_changed(self.analysis_mode_combo.currentIndex())
 
@@ -349,11 +393,13 @@ class FaceModeTaskPanel:
             import FreeCADGui as Gui  # type: ignore[import]
         except ImportError:
             self.result_label.setText("FreeCADGui недоступен.")
+            _log_err("_update_selection: FreeCADGui not available")
             return False
 
         sel_ex = Gui.Selection.getSelectionEx()
         if not sel_ex:
             self.result_label.setText("Не выбрана плоская грань или эскиз.")
+            _log("_update_selection: no selection")
             return False
 
         sel_obj = sel_ex[0]
@@ -361,11 +407,14 @@ class FaceModeTaskPanel:
         if getattr(sel_obj, "SubObjects", None):
             if sel_obj.SubObjects:
                 shape = sel_obj.SubObjects[0]
+                _log("_update_selection: using first SubObject")
         if shape is None and hasattr(sel_obj.Object, "Shape"):
             shape = sel_obj.Object.Shape
+            _log("_update_selection: using Object.Shape")
 
         if shape is None or not hasattr(shape, "BoundBox"):
             self.result_label.setText("Не удалось получить габариты выделенного объекта.")
+            _log_err("_update_selection: shape is None or has no BoundBox")
             return False
 
         bb = shape.BoundBox
@@ -376,10 +425,16 @@ class FaceModeTaskPanel:
         if hasattr(shape, "Area"):
             try:
                 area_mm2 = float(shape.Area)
-            except Exception:
+            except Exception as exc:
+                _log_err(f"_update_selection: cannot get Area: {exc}")
                 area_mm2 = 0.0
         if area_mm2 <= 0.0:
             area_mm2 = float(bb.XLength * bb.YLength)
+
+        _log(
+            "_update_selection: "
+            f"Lx={length_mm:.3f} Ly={width_mm:.3f} area={area_mm2:.3f}"
+        )
 
         self.controller.selection = FaceSelection(
             length_mm=length_mm,
@@ -391,7 +446,6 @@ class FaceModeTaskPanel:
 
     # ------------------------------------------------------ core compute -----
     def _update_result_label(self) -> None:
-        """Пересчитать результат в зависимости от режима анализа и обновить label."""
         if not self._update_selection():
             return
         if self.controller.selection is None:
@@ -404,12 +458,15 @@ class FaceModeTaskPanel:
         heatsink_type = self._current_type_key
         mat = self._current_material()
 
-        # общие параметры (без высоты)
         params_common: Dict[str, float] = {
             name: widget.value() for name, widget in self._param_widgets.items()
         }
 
-        # базовая толщина
+        _log(
+            f"_update_result_label: mode={mode}, type={heatsink_type}, "
+            f"params_common={params_common}"
+        )
+
         if heatsink_type == "solid_plate":
             base_thickness_mm = float(self.height_spin.value())
         else:
@@ -419,7 +476,6 @@ class FaceModeTaskPanel:
 
         base_thickness_m = base_thickness_mm / 1000.0
 
-        # ----- режим: P_load по высоте -----
         if mode == "h_to_q":
             params = dict(params_common)
             if heatsink_type == "solid_plate":
@@ -447,6 +503,7 @@ class FaceModeTaskPanel:
                 )
             except Exception as exc:
                 self.result_label.setText(f"Ошибка теплового расчёта: {exc}")
+                _log_err(f"_update_result_label h_to_q: {exc}")
                 return
 
             self.result_label.setText(
@@ -458,7 +515,7 @@ class FaceModeTaskPanel:
             )
             return
 
-        # ----- режим: высота по P_load -----
+        # режим: высота по P_load
         p_req = float(self.power_spin.value())
         if p_req <= 0.0:
             self.result_label.setText(
@@ -472,13 +529,12 @@ class FaceModeTaskPanel:
             self.result_label.setText("Для данного типа не найден параметр высоты.")
             return
 
-        # функция: по высоте → Q_max
         def q_for_height(h_mm: float) -> float:
             params = dict(params_common)
             if heatsink_type == "solid_plate":
                 base_t_local_mm = h_mm
                 base_t_local_m = base_t_local_mm / 1000.0
-                params[height_param] = h_mm  # base_thickness_mm
+                params[height_param] = h_mm
             else:
                 base_t_local_mm = base_thickness_mm
                 base_t_local_m = base_t_local_mm / 1000.0
@@ -501,10 +557,11 @@ class FaceModeTaskPanel:
             )
             return res.heat_dissipation_w
 
-        # Поиск от 1 мм, чтобы высота могла и уменьшаться
         H_CAP = 1000.0
         h_min = 1.0
         q_min = q_for_height(h_min)
+        _log(f"_update_result_label q_to_h: p_req={p_req}, q_min@1mm={q_min}")
+
         if q_min >= p_req:
             best_h = h_min
         else:
@@ -513,8 +570,8 @@ class FaceModeTaskPanel:
             best_h = None
             while h_high <= H_CAP:
                 q_high = q_for_height(h_high)
+                _log(f"  range expand: h_high={h_high}, q_high={q_high}")
                 if q_high >= p_req:
-                    # бинарный поиск
                     for _ in range(20):
                         h_mid = 0.5 * (h_low + h_high)
                         q_mid = q_for_height(h_mid)
@@ -532,15 +589,19 @@ class FaceModeTaskPanel:
                 "Даже при высоте до 1000 мм требуемая мощность не достигается.\n"
                 "Уменьшите P_load или увеличьте площадь основания."
             )
+            _log("_update_result_label q_to_h: best_h is None")
             return
 
-        # Округляем до 1 мм
         h_round = max(1.0, round(best_h))
         self.height_spin.blockSignals(True)
         self.height_spin.setValue(h_round)
         self.height_spin.blockSignals(False)
 
         q_round = q_for_height(h_round)
+        _log(
+            f"_update_result_label q_to_h: best_h={best_h}, "
+            f"h_round={h_round}, q_round={q_round}"
+        )
 
         self.result_label.setText(
             "Режим: высота по P_load\n"
@@ -553,8 +614,9 @@ class FaceModeTaskPanel:
 
     # ----------------------------------------------------------- callbacks ---
     def _on_generate_clicked(self) -> None:
-        """Сгенерировать 3D-модель радиатора в текущем документе FreeCAD."""
         QtWidgets = self._QtWidgets
+
+        _log("_on_generate_clicked: pressed")
 
         if not self._update_selection():
             return
@@ -571,7 +633,6 @@ class FaceModeTaskPanel:
         }
 
         heatsink_type = self._current_type_key
-        # толщина основания
         if heatsink_type == "solid_plate":
             base_thickness_mm = float(self.height_spin.value())
         else:
@@ -583,44 +644,52 @@ class FaceModeTaskPanel:
         if self._height_param_name:
             params[self._height_param_name] = float(self.height_spin.value())
 
+        _log(
+            f"_on_generate_clicked: type={heatsink_type}, "
+            f"base_thickness={base_thickness_mm}, params={params}"
+        )
+
         try:
-            import FreeCAD as App  # type: ignore[import]
+            import FreeCAD as AppLocal  # type: ignore[import]
         except ImportError:
             QtWidgets.QMessageBox.critical(
                 self.form,
                 "HeatsinkDesigner",
                 "FreeCAD недоступен для построения 3D-модели",
             )
+            _log_err("_on_generate_clicked: FreeCAD import failed")
             return
 
         self.controller.validate_selection()
         sel = self.controller.selection
-        base_dims = sel.base_dimensions(base_thickness_mm)
 
         try:
-            obj = create_heatsink_solid(
-                heatsink_type,
-                base_dims,
-                params,
-                doc=App.ActiveDocument,
-                profile_shape=sel.shape,
+            obj = create_heatsink_feature(
+                heatsink_type=heatsink_type,
+                source_shape=sel.shape,
+                base_thickness_mm=base_thickness_mm,
+                params=params,
+                material_key=self._current_material_key(),
+                doc=AppLocal.ActiveDocument,
             )
-        except Exception as exc:  # pragma: no cover - GUI only
+        except Exception as exc:
             QtWidgets.QMessageBox.critical(
                 self.form,
                 "HeatsinkDesigner",
                 f"Ошибка построения 3D-модели:\n{exc}",
             )
+            _log_err(f"_on_generate_clicked: create_heatsink_feature failed: {exc}")
             return
 
-        App.Console.PrintMessage(
-            f"[HeatsinkDesigner] Создан радиатор: {obj.Name} ({obj.Label})\n"
+        AppLocal.Console.PrintMessage(
+            f"[HeatsinkDesigner] Создан параметрический радиатор: {obj.Name} ({obj.Label})\n"
         )
+        _log("_on_generate_clicked: object created successfully")
 
         self._update_result_label()
 
     def _on_chart_clicked(self) -> None:
-        """Построить график Q_max(h) для текущего типа."""
+        # логирование тут уже не критично; оставлю как было без доп. шума
         QtWidgets = self._QtWidgets
 
         heatsink_type = self._current_type_key
@@ -646,7 +715,6 @@ class FaceModeTaskPanel:
         env = Environment()
         delta_t = float(self.delta_t_spin.value())
 
-        # толщина основания
         if heatsink_type == "solid_plate":
             base_thickness_mm0 = float(self.height_spin.value())
         else:
@@ -700,6 +768,8 @@ class FaceModeTaskPanel:
                 base_contact_area_m2=details.geometry.base_area_m2,
             )
             q_values.append(res.heat_dissipation_w)
+
+        import matplotlib.pyplot as plt  # type: ignore
 
         plt.plot(heights, q_values, marker="o")
         plt.xlabel("Высота, мм")

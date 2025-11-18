@@ -7,4 +7,5 @@ __all__ = [
     "geometry_builder",
     "gui_face_mode",
     "gui_dim_mode",
+    "heatsink_feature",
 ]
