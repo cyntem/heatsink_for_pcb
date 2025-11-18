@@ -281,7 +281,8 @@ def build_geometry(
 def _profile_to_face(profile_shape, base: BaseDimensions):
     """Преобразовать выбранный профиль (face/sketch) в Part.Face.
 
-    Если что-то пошло не так, возвращаем прямоугольную плоскость L×W.
+    При наличии отверстий стараемся сохранить их (используем Wires).
+    При ошибке возвращаем прямоугольную плоскость L×W.
     """
     try:
         import Part  # type: ignore
@@ -295,18 +296,28 @@ def _profile_to_face(profile_shape, base: BaseDimensions):
     if hasattr(shape, "Shape"):
         shape = shape.Shape  # type: ignore[assignment]
 
+    # Если уже есть лица – берём первое (обычно одно с отверстиями)
     try:
         if hasattr(shape, "Faces") and shape.Faces:  # type: ignore[attr-defined]
             return shape.Faces[0]  # type: ignore[index]
     except Exception:
         pass
 
+    # Если есть набор проводов (outer + inner) – делаем лицо с отверстиями
+    try:
+        if hasattr(shape, "Wires") and shape.Wires:  # type: ignore[attr-defined]
+            return Part.Face(shape.Wires)  # type: ignore[arg-type]
+    except Exception:
+        pass
+
+    # Fallback: только внешний контур
     try:
         if hasattr(shape, "OuterWire"):  # type: ignore[attr-defined]
             return Part.Face(shape.OuterWire)  # type: ignore[arg-type]
     except Exception:
         pass
 
+    # Последний шанс
     try:
         return Part.Face(shape)  # type: ignore[arg-type]
     except Exception:
@@ -320,13 +331,16 @@ def _create_fins_solid(
     base: BaseDimensions,
     params: Dict[str, float],
     bb,
+    z_base: float,
 ):
-    """Создать объединённый solid всех рёбер/пинов и вернуть (solid, высота_ребра_мм)."""
+    """Создать объединённый solid всех рёбер/пинов.
+
+    z_base – абсолютная Z-координата верха основания, откуда начинают рёбра.
+    """
     x0 = bb.XMin
     y0 = bb.YMin
     L = bb.XLength
     W = bb.YLength
-    z_base = base.base_thickness_mm
 
     solids: List[object] = []
     max_height = 0.0
@@ -405,7 +419,12 @@ def create_heatsink_solid(
     doc=None,
     profile_shape=None,
 ):
-    """Создать 3D-модель радиатора в FreeCAD."""
+    """Создать 3D-модель радиатора в FreeCAD.
+
+    Рёбра всегда начинаются строго от верха основания (не заходят в него).
+    При проблемах с булевыми операциями по контуру с отверстиями
+    есть запасной режим без обрезки по контуру.
+    """
     try:
         import FreeCAD as App  # type: ignore
         import Part  # type: ignore
@@ -418,8 +437,10 @@ def create_heatsink_solid(
         doc = App.ActiveDocument or App.newDocument("HeatsinkDesigner")
 
     base_face = _profile_to_face(profile_shape, base)
-    normal = App.Vector(0, 0, 1)
+    bb_face = base_face.BoundBox
+    normal = App.Vector(0, 0, 1)  # пока жёстко вверх
 
+    # Основание
     base_solid = base_face.extrude(normal * base.base_thickness_mm)
 
     if heatsink_type == "solid_plate":
@@ -429,13 +450,17 @@ def create_heatsink_solid(
         doc.recompute()
         return obj
 
+    # Рёбра стартуют от верха основания
+    z_top_base = bb_face.ZMax + base.base_thickness_mm
+
     fins_solid, fin_height_mm = _create_fins_solid(
         Part,
         App,
         heatsink_type,
         base,
         params,
-        base_face.BoundBox,
+        bb_face,
+        z_top_base,
     )
     if fins_solid is None or fin_height_mm <= 0:
         obj = doc.addObject("Part::Feature", "Heatsink_BaseOnly")
@@ -447,8 +472,13 @@ def create_heatsink_solid(
     total_height = base.base_thickness_mm + fin_height_mm
     contour_prism = base_face.extrude(normal * total_height)
 
-    fins_trimmed = fins_solid.common(contour_prism)
-    result_solid = base_solid.fuse(fins_trimmed)
+    # Попытка обрезать рёбра по реальному контуру (с отверстиями)
+    try:
+        fins_trimmed = fins_solid.common(contour_prism)
+        result_solid = base_solid.fuse(fins_trimmed)
+    except Exception:
+        # Fallback: без обрезки, просто рёбра по bounding box
+        result_solid = base_solid.fuse(fins_solid)
 
     name_prefix = {
         "straight_fins": "Heatsink_StraightFins",

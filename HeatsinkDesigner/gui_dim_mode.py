@@ -114,18 +114,24 @@ class DimensionModeTaskPanel:
 
         self.length_spin = QtWidgets.QDoubleSpinBox()
         self.length_spin.setRange(1.0, 1e6)
+        self.length_spin.setDecimals(2)
+        self.length_spin.setSingleStep(0.1)
         self.length_spin.setValue(100.0)
         self.length_spin.setSuffix(" мм")
         dims_layout.addRow("Длина L:", self.length_spin)
 
         self.width_spin = QtWidgets.QDoubleSpinBox()
         self.width_spin.setRange(1.0, 1e6)
+        self.width_spin.setDecimals(2)
+        self.width_spin.setSingleStep(0.1)
         self.width_spin.setValue(50.0)
         self.width_spin.setSuffix(" мм")
         dims_layout.addRow("Ширина W:", self.width_spin)
 
         self.base_thickness_spin = QtWidgets.QDoubleSpinBox()
         self.base_thickness_spin.setRange(0.5, 1e6)
+        self.base_thickness_spin.setDecimals(2)
+        self.base_thickness_spin.setSingleStep(0.1)
         self.base_thickness_spin.setValue(5.0)
         self.base_thickness_spin.setSuffix(" мм")
         dims_layout.addRow("Толщина основания:", self.base_thickness_spin)
@@ -317,14 +323,14 @@ class DimensionModeTaskPanel:
             )
             return res.heat_dissipation_w
 
-        h = max(float(self.height_spin.value()), 1.0)
-        q = q_for_height(h)
-        if q >= p_req:
-            return h
+        # поиск от 1 мм, чтобы высота могла и уменьшаться
+        h_min = 1.0
+        q_min = q_for_height(h_min)
+        if q_min >= p_req:
+            return h_min
 
-        # Адаптивное расширение
-        h_low = h
-        h_high = h * 2.0
+        h_low = h_min
+        h_high = 2.0 * h_min
 
         while h_high <= H_CAP:
             q_high = q_for_height(h_high)

@@ -145,7 +145,7 @@ class FaceModeTaskPanel:
         self.controller = FaceSketchController()
 
         self._height_param_name: Optional[str] = None
-        self._current_type_key: str = list(SUPPORTED_TYPES.keys())[0]
+        self._current_type_key: str = "straight_fins"  # по умолчанию рёбра
 
         self.form = QtWidgets.QWidget()
         self._build_ui()
@@ -176,7 +176,6 @@ class FaceModeTaskPanel:
         for key in self._type_keys:
             hs_type = SUPPORTED_TYPES[key]
             self.type_combo.addItem(hs_type.label, userData=key)
-        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         type_row.addWidget(type_label)
         type_row.addWidget(self.type_combo)
         layout.addLayout(type_row)
@@ -261,8 +260,18 @@ class FaceModeTaskPanel:
         self.height_spin.valueChanged.connect(self._update_result_label)
         self.material_combo.currentIndexChanged.connect(self._update_result_label)
         self.analysis_mode_combo.currentIndexChanged.connect(self._on_analysis_mode_changed)
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
 
-        # Инициализация
+        # Установим тип по умолчанию: Straight milled fins
+        if "straight_fins" in self._type_keys:
+            idx = self._type_keys.index("straight_fins")
+            self.type_combo.setCurrentIndex(idx)
+            self._current_type_key = "straight_fins"
+        else:
+            self._current_type_key = self.type_combo.itemData(
+                self.type_combo.currentIndex()
+            )
+
         self._on_type_changed(self.type_combo.currentIndex())
 
     # ----------------------------------------------------------- helpers -----
@@ -319,6 +328,7 @@ class FaceModeTaskPanel:
 
             spin = QtWidgets.QDoubleSpinBox()
             spin.setDecimals(2)
+            spin.setSingleStep(0.1)  # шаг 0.1 мм
             spin.setRange(param.min_value, 1e6)
             spin.setValue(defaults.get(param.name, max(param.min_value, 0.0)))
             spin.setSuffix(" " + param.unit)
@@ -441,6 +451,7 @@ class FaceModeTaskPanel:
 
             self.result_label.setText(
                 f"Режим: P_load по высоте\n"
+                f"Тип радиатора: {SUPPORTED_TYPES[heatsink_type].label}\n"
                 f"Материал: {mat.label}\n"
                 f"Макс. допустимая мощность P_load_max ≈ {res.heat_dissipation_w:.1f} Вт\n"
                 f"при ΔT = {delta_t:.1f} °C."
@@ -464,7 +475,6 @@ class FaceModeTaskPanel:
         # функция: по высоте → Q_max
         def q_for_height(h_mm: float) -> float:
             params = dict(params_common)
-            # для пластины толщина основания = высота
             if heatsink_type == "solid_plate":
                 base_t_local_mm = h_mm
                 base_t_local_m = base_t_local_mm / 1000.0
@@ -491,21 +501,20 @@ class FaceModeTaskPanel:
             )
             return res.heat_dissipation_w
 
-        # адаптивный поиск высоты (до 1 м)
+        # Поиск от 1 мм, чтобы высота могла и уменьшаться
         H_CAP = 1000.0
-        h = max(float(self.height_spin.value()), 1.0)
-
-        q = q_for_height(h)
-        if q >= p_req:
-            best_h = h
+        h_min = 1.0
+        q_min = q_for_height(h_min)
+        if q_min >= p_req:
+            best_h = h_min
         else:
-            h_low = h
-            h_high = h * 2.0
+            h_low = h_min
+            h_high = 2.0 * h_min
             best_h = None
             while h_high <= H_CAP:
                 q_high = q_for_height(h_high)
                 if q_high >= p_req:
-                    # есть интервал [h_low, h_high] → бинарный поиск
+                    # бинарный поиск
                     for _ in range(20):
                         h_mid = 0.5 * (h_low + h_high)
                         q_mid = q_for_height(h_mid)
@@ -535,6 +544,7 @@ class FaceModeTaskPanel:
 
         self.result_label.setText(
             "Режим: высота по P_load\n"
+            f"Тип радиатора: {SUPPORTED_TYPES[heatsink_type].label}\n"
             f"Материал: {mat.label}\n"
             f"Необходимая высота ≈ {h_round:.0f} мм\n"
             f"для P_load = {p_req:.1f} Вт и ΔT = {delta_t:.1f} °C.\n"
