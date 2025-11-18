@@ -79,4 +79,3 @@ pytest
 
 The command covers basic checks for the thermal calculations and geometry generation.
 
-![Short manual](demo.gif)
