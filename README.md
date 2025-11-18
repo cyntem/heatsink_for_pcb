@@ -1,5 +1,7 @@
 # Heatsink Designer Workbench (FreeCAD)
 
+
+
 The **HeatsinkDesignerWB** extension adds a FreeCAD tool for parametrically generating heatsinks and estimating their heat dissipation. The code is organized as a lightweight Python package that can live in the FreeCAD `Mod` folder and can also be used without the GUI for quick calculations.
 
 ## Features
@@ -76,3 +78,5 @@ pytest
 ```
 
 The command covers basic checks for the thermal calculations and geometry generation.
+
+![Short manual](demo.gif)
