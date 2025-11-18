@@ -1,7 +1,10 @@
 """FreeCAD GUI commands for HeatsinkDesigner Workbench."""
 from __future__ import annotations
 
+import sys
 from importlib import import_module
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import Protocol
 
 
@@ -61,7 +64,8 @@ def _import_taskpanel(module_name: str, class_name: str):
 
     1) Try importing .<module_name> relative to this package.
     2) Try importing HeatsinkDesigner.<module_name>.
-    3) If that fails — just <module_name>.
+    3) If that fails — try loading <module_name>.py next to this file.
+    4) As a last resort — import <module_name>.
     On error print a message to the FreeCAD console and return None.
     """
     last_exc: Exception | None = None
@@ -73,7 +77,6 @@ def _import_taskpanel(module_name: str, class_name: str):
     search_order = (
         (f".{module_name}", __package__),
         (f"HeatsinkDesigner.{module_name}", None),
-        (module_name, None),
     )
 
     for modname, pkg in search_order:
@@ -83,6 +86,33 @@ def _import_taskpanel(module_name: str, class_name: str):
             return cls
         except Exception as exc:
             last_exc = exc
+
+    # Local file fallback (useful when the workbench is loaded as loose scripts)
+    module_path: Path | None = None
+    if "__file__" in globals():
+        candidate = Path(__file__).parent / f"{module_name}.py"
+        if candidate.exists():
+            module_path = candidate
+
+    if module_path is not None:
+        try:
+            spec = spec_from_file_location(module_name, module_path)
+            if spec and spec.loader:
+                module = module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                cls = getattr(module, class_name)
+                return cls
+        except Exception as exc:
+            last_exc = exc
+
+    # Final attempt with a plain import
+    try:
+        module = import_module(module_name)
+        cls = getattr(module, class_name)
+        return cls
+    except Exception as exc:
+        last_exc = exc
 
     msg = f"Cannot import {class_name}: {last_exc}"
     if App is not None:
