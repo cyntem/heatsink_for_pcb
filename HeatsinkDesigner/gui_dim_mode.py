@@ -1,3 +1,4 @@
+#gui_dim_mode.py
 """Task panel logic for dimension-driven mode."""
 from __future__ import annotations
 
@@ -291,7 +292,7 @@ class DimensionModeTaskPanel:
         p_req: float,
         material_k: float,
     ) -> Optional[float]:
-    """Find height for this type given required power (without H_max)."""
+        """Find height for this type given required power (without H_max)."""
         env = Environment()
         hp = HEIGHT_PARAM_MAP.get(type_key)
         if not hp:
@@ -352,7 +353,7 @@ class DimensionModeTaskPanel:
     def _compute_best_config(
         self,
     ) -> Tuple[Optional[str], Optional[Dict[str, float]], Optional[GeometryDetails], str]:
-    """Compute the best option for the current analysis mode without generating 3D."""
+        """Compute the best option for the current analysis mode without generating 3D."""
         dim = self._dimension_input()
         if dim is None:
             return None, None, None, "Invalid dimensions."
