@@ -3,13 +3,30 @@
   <name>HeatsinkDesigner</name>
   <version>0.1.0</version>
   <description>FreeCAD workbench for generating CNC-friendly heatsinks and estimating heat dissipation.</description>
-  <maintainer email="">HeatsinkDesigner Maintainers</maintainer>
-  <license>LicenseRef-UNSPECIFIED</license>
-  <url type="repository">https://github.com/cyntem/heatsink_for_pcb/</url>
-  <url type="bugtracker">https://github.com/cyntem/heatsink_for_pcb/issues</url>
-  <url type="documentation">https://github.com/cyntem/heatsink_for_pcb/raw/main/README.md</url>
+
+  <maintainer email="you@example.com">HeatsinkDesigner Maintainers</maintainer>
+  <license>MIT</license>
+
+  <!-- ВАЖНО: branch="main" -->
+  <url type="repository" branch="main">
+    https://github.com/cyntem/heatsink_for_pcb
+  </url>
+
+  <url type="bugtracker">
+    https://github.com/cyntem/heatsink_for_pcb/issues
+  </url>
+
+  <!-- лучше полную ссылку на README на ветке main -->
+  <url type="documentation">
+    https://github.com/cyntem/heatsink_for_pcb/blob/main/README.md
+  </url>
+
+  <!-- путь иконки относительно корня аддона -->
   <icon>HeatsinkDesigner/icons/heatsink.svg</icon>
+
   <content>
-    <workbench>HeatsinkDesigner</workbench>
+    <workbench>
+      <name>HeatsinkDesigner</name>
+    </workbench>
   </content>
 </package>
