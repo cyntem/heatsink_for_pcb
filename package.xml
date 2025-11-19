@@ -5,8 +5,8 @@
   <description>FreeCAD workbench for generating CNC-friendly heatsinks and estimating heat dissipation.</description>
   <maintainer email="">HeatsinkDesigner Maintainers</maintainer>
   <license>LicenseRef-UNSPECIFIED</license>
-  <url type="repository">https://github.com/</url>
-  <url type="bugtracker">https://github.com//issues</url>
+  <url type="repository">https://github.com/cyntem/heatsink_for_pcb.git/</url>
+  <url type="bugtracker">https://github.com/cyntem/heatsink_for_pcb.git/issues</url>
   <url type="documentation">README.md</url>
   <icon>HeatsinkDesigner/icons/heatsink.svg</icon>
   <content>
