@@ -278,6 +278,71 @@ def build_geometry(
 # 3D geometry in FreeCAD (arbitrary outline)
 # ---------------------------------------------------------------------------
 
+def _fc_shape_solids(shape) -> List[object]:
+    """Return solids contained in a FreeCAD shape, skipping null entries."""
+    solids: List[object] = []
+    try:
+        solids = [s for s in getattr(shape, "Solids", []) if not s.isNull()]
+    except Exception:
+        solids = []
+    if solids:
+        return solids
+    try:
+        if shape is not None and hasattr(shape, "isNull") and not shape.isNull():
+            return [shape]
+    except Exception:
+        pass
+    return []
+
+
+def _refine_fc_shape(shape):
+    """Remove splitter edges to help keep the result a single solid."""
+    if shape is None:
+        return None
+    try:
+        refined = shape.removeSplitter()
+        if hasattr(refined, "isNull") and not refined.isNull():
+            return refined
+    except Exception:
+        pass
+    return shape
+
+
+def _fuse_with_base(base_solid, extras: List[object]):
+    """Fuse base solid with a list of extra shapes and refine the result."""
+    solids: List[object] = [base_solid]
+    for shp in extras:
+        solids.extend(_fc_shape_solids(shp))
+
+    fused = None
+    for shp in solids:
+        try:
+            if shp is None or shp.isNull():
+                continue
+        except Exception:
+            continue
+        fused = shp if fused is None else fused.fuse(shp)
+
+    fused = _refine_fc_shape(fused)
+
+    multi_solids: List[object] = []
+    try:
+        multi_solids = getattr(fused, "Solids", [])
+    except Exception:
+        multi_solids = []
+
+    if len(multi_solids) > 1:
+        merged = multi_solids[0]
+        for extra in multi_solids[1:]:
+            try:
+                merged = merged.fuse(extra)
+            except Exception:
+                continue
+        fused = _refine_fc_shape(merged)
+
+    return fused if fused is not None else base_solid
+
+
 def _profile_to_face(profile_shape, base: BaseDimensions):
     """Convert the selected profile (face/sketch) to Part.Face.
 
@@ -475,10 +540,11 @@ def create_heatsink_solid(
     # Attempt to trim fins to the real outline (with holes)
     try:
         fins_trimmed = fins_solid.common(contour_prism)
-        result_solid = base_solid.fuse(fins_trimmed)
     except Exception:
-        # Fallback: no trimming, fins via bounding box
-        result_solid = base_solid.fuse(fins_solid)
+        fins_trimmed = fins_solid
+
+    # Fuse everything into a single refined solid
+    result_solid = _fuse_with_base(base_solid, [fins_trimmed])
 
     name_prefix = {
         "straight_fins": "Heatsink_StraightFins",

@@ -47,6 +47,70 @@ def _log_err(msg: str) -> None:
         print(prefix + msg)
 
 
+# ---------- shape helpers ---------------------------------------------------
+
+
+def _shape_solids(shape) -> List["Part.Shape"]:
+    """Return a list of non-null solids from a shape or fall back to [shape]."""
+    solids: List["Part.Shape"] = []
+    try:
+        solids = [s for s in getattr(shape, "Solids", []) if not s.isNull()]
+    except Exception:
+        solids = []
+    if solids:
+        return solids
+    try:
+        if shape is not None and hasattr(shape, "isNull") and not shape.isNull():
+            return [shape]
+    except Exception:
+        pass
+    return []
+
+
+def _refine_shape(shape):
+    """Try to merge splitter faces/edges to keep a single solid when possible."""
+    if shape is None:
+        return None
+    try:
+        refined = shape.removeSplitter()
+        if hasattr(refined, "isNull") and not refined.isNull():
+            return refined
+    except Exception as exc:
+        _log_err(f" _refine_shape: removeSplitter failed: {exc}")
+    return shape
+
+
+def _fuse_shapes(shapes: List["Part.Shape"]):
+    """Fuse a list of shapes into one and refine it."""
+    fused = None
+    for idx, shp in enumerate(shapes):
+        try:
+            if shp is None or shp.isNull():
+                continue
+        except Exception:
+            continue
+        fused = shp if fused is None else fused.fuse(shp)
+    fused = _refine_shape(fused)
+
+    # If the fuse still returns multiple solids (e.g. touching faces only),
+    # try to merge them explicitly to keep a single exportable part.
+    extra_solids: List["Part.Shape"] = []
+    try:
+        extra_solids = getattr(fused, "Solids", [])
+    except Exception:
+        extra_solids = []
+    if fused is not None and len(extra_solids) > 1:
+        merged = extra_solids[0]
+        for s in extra_solids[1:]:
+            try:
+                merged = merged.fuse(s)
+            except Exception as exc:
+                _log_err(f" _fuse_shapes: secondary fuse failed: {exc}")
+        fused = _refine_shape(merged)
+
+    return fused
+
+
 # ---------- selecting base face and holes ---------------------------------
 
 
@@ -487,19 +551,35 @@ def create_heatsink_feature(
                 )
 
             try:
-                result_solid = Part.Compound([base_solid, fins_trimmed])
-                _log(
-                    " create_heatsink_feature: result_solid via Part.Compound; "
-                    f"Volume={getattr(result_solid, 'Volume', 'N/A')}, "
-                    f"Solids={len(getattr(result_solid, 'Solids', []))}"
-                )
+                fin_solids = _shape_solids(fins_trimmed)
+                if not fin_solids:
+                    _log(
+                        " create_heatsink_feature: fins_trimmed produced no solids, "
+                        "using base_solid only"
+                    )
+                    result_solid = base_solid
+                else:
+                    result_solid = _fuse_shapes([base_solid] + fin_solids)
+                    if result_solid is None:
+                        _log_err(
+                            " create_heatsink_feature: fusion failed, "
+                            "falling back to base_solid"
+                        )
+                        result_solid = base_solid
+                    else:
+                        solid_count = len(getattr(result_solid, "Solids", []))
+                        _log(
+                            " create_heatsink_feature: fused base with fins; "
+                            f"Solids={solid_count}, "
+                            f"Volume={getattr(result_solid, 'Volume', 'N/A')}"
+                        )
             except Exception as exc:
-                _log_err(f" create_heatsink_feature: Part.Compound failed: {exc}")
+                _log_err(f" create_heatsink_feature: fusion failed: {exc}")
                 result_solid = base_solid
 
     # Create a regular Part::Feature
     obj = doc.addObject("Part::Feature", "Heatsink")
-    obj.Shape = result_solid
+    obj.Shape = _refine_shape(result_solid)
 
     # Store small reference info in properties
     try:
@@ -560,7 +640,8 @@ def create_heatsink_feature(
     doc.recompute()
     _log(
         "create_heatsink_feature: document recomputed; "
-        f"final Volume={getattr(obj.Shape, 'Volume', 'N/A')}"
+        f"final Volume={getattr(obj.Shape, 'Volume', 'N/A')}, "
+        f"Solids={len(getattr(obj.Shape, 'Solids', []))}"
     )
 
     if Gui is not None:
